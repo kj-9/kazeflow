@@ -15,8 +15,15 @@ typecheck:
 test:
 	$(UV_RUN) pytest
 
+ci-check:
+	$(UCV_RUN) ruff format . --check
+	$(UV_RUN) ruff check .
+	$(UV_RUN) ty check
+
+
 check:
-	$(MAKE) -j format lint typecheck test
+	$(MAKE) -j format lint typecheck
+
 
 build:
 	uv build --frozen

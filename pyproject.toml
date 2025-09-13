@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Kj", email = "46800811+kj-9@users.noreply.github.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = []
 
 [build-system]
