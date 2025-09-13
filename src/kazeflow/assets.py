@@ -1,7 +1,5 @@
 from typing import Any, Optional, Protocol, TypedDict
 
-from .config import Config
-
 
 class NamedCallable(Protocol):
     __name__: str
@@ -12,7 +10,6 @@ class NamedCallable(Protocol):
 class AssetMeta(TypedDict):
     func: NamedCallable
     deps: list[str]
-    config_schema: Optional[Config]
 
 
 _assets: dict[str, AssetMeta] = {}
@@ -20,7 +17,6 @@ _assets: dict[str, AssetMeta] = {}
 
 def asset(
     deps: Optional[list[str]] = None,
-    config_schema: Optional[Config] = None,
 ):
     """
     A decorator to define an asset, its dependencies, and its configuration schema.
@@ -30,12 +26,10 @@ def asset(
         _assets[func.__name__] = {
             "func": func,
             "deps": deps or [],
-            "config_schema": config_schema,
         }
         return func
 
     return decorator
-
 
 def get_asset(name: str) -> AssetMeta:
     """Retrieves an asset's metadata including its function, dependencies,
