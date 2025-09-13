@@ -1,6 +1,6 @@
 [project]
 name = "kazeflow"
-version = "0.1.0a"
+version = "0.1.0a0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
