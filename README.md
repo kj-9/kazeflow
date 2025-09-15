@@ -3,47 +3,104 @@
 
 `kazeflow` is a lightweight, asset-based task flow engine inspired by Dagster. It is designed to be simple, flexible, and easy to use.
 
-## Design Philosophy
-
-The core philosophy of `kazeflow` is to model data pipelines as a collection of assets. An asset is a persistent object in the real world, such as a file, a database table, or a machine learning model. A task is a function that produces or updates an asset.
-
-This asset-based approach has several advantages over traditional task-based workflow engines:
-
-*   **Data-centric**: By focusing on the assets, `kazeflow` provides a more natural way to reason about data dependencies and lineage.
-*   **Declarative**: Assets and their dependencies are defined declaratively using the `@asset` decorator. This makes the data flow easy to understand and visualize.
-*   **Loose coupling**: Assets are loosely coupled, which makes them easy to test, reuse, and maintain.
-
-## Core Concepts
-
-*   **`@asset` decorator**: A decorator to define an asset and its dependencies. The decorator takes the asset's name, a list of dependencies, and an optional configuration schema.
-*   **`Flow` class**: A container for a set of assets that are meant to be executed together. The `Flow` class is responsible for resolving the dependency graph and executing the assets in the correct order.
-*   **`Config` class**: A simple class for accessing configuration within an asset.
-
 ## Example
 
-Here is a simple example of how to use `kazeflow` to define and execute a data flow:
+When you run this script, `kazeflow` will execute the assets in the correct order, handle the failure of `failing_asset` gracefully, and provide a rich terminal UI to visualize the progress.
 
+
+Here is a simple example of how to use `kazeflow` to define and execute a data flow with dependencies, inputs/outputs, and logging.
+
+
+example.py:
 ```python
+import asyncio
+
 from kazeflow.assets import asset
+from kazeflow.context import AssetContext
 from kazeflow.flow import Flow
-from kazeflow.config import Config
 
-@asset
-def raw_data():
-    """This asset returns a simple list of numbers."""
-    return [1, 2, 3, 4, 5]
 
-@asset(deps=["raw_data"], config_schema=Config)
-def processed_data(config: Config, raw_data):
-    """This asset processes the raw data by summing and multiplying it."""
-    multiplier = config.get("multiplier", 1)
-    return sum(raw_data) * multiplier
+# A simple asset with no dependencies
+@asset()
+async def users() -> list[str]:
+    """This asset returns a list of user names."""
+    return ["Alice", "Bob", "Charlie"]
+
+
+# This asset depends on the `users` asset.
+# The output of `users` is automatically passed as an argument.
+@asset(deps=["users"])
+async def greetings(users: list[str], context: AssetContext) -> list[str]:
+    """This asset receives the list of users and a context object.
+
+    It uses the context to get a logger and log a message.
+    """
+    context.logger.info(f"Generating greetings for {len(users)} users.")
+    return [f"Hello, {user}!" for user in users]
+
+
+# This asset fails intentionally to demonstrate error handling.
+@asset(deps=["users"])
+async def failing_asset(users: list[str]):
+    """This asset always fails."""
+    raise ValueError("This asset is designed to fail.")
+
 
 if __name__ == "__main__":
-    my_flow = Flow(asset_names=["processed_data"])
-    flow_config = {
-        "processed_data": {"multiplier": 2}
-    }
-    results = my_flow.run(config=flow_config)
-    print(f"Flow results: {results}")
+    # Define a flow that includes the final assets we want to generate.
+    # kazeflow automatically includes all upstream dependencies.
+    flow = Flow(asset_names=["greetings", "failing_asset"])
+
+    # Run the flow asynchronously.
+    # You can limit the number of concurrent assets with `max_concurrency`.
+    asyncio.run(flow.run_async(max_concurrency=2))
+
+```
+```bash
+❯ uv run example.py
+Task Flow (Execution Order)
+└── users
+    ├── failing_asset
+    └── greetings
+
+Execution Logs
+INFO     Executing asset: users                                         
+INFO     Finished executing asset: users in 0.00s                       
+INFO     Executing asset: greetings                                     
+INFO     Generating greetings for 3 users.                              
+INFO     Finished executing asset: greetings in 0.00s                   
+INFO     Executing asset: failing_asset                                 
+ERROR    Error executing asset failing_asset: This asset is designed to 
+         fail.                                                          
+         ╭───────────── Traceback (most recent call last) ─────────────╮
+         │ /Users/kh03/work/repos/myflow/src/kazeflow/flow.py:82 in    │
+         │ _execute_asset                                              │
+         │                                                             │
+         │    79 │   │   │   │   input_kwargs["context"] = context     │
+         │    80 │   │   │                                             │
+         │    81 │   │   │   if asyncio.iscoroutinefunction(asset_func │
+         │ ❱  82 │   │   │   │   output = await asset_func(**input_kwa │
+         │    83 │   │   │   else:                                     │
+         │    84 │   │   │   │   # Run sync function in a thread pool  │
+         │    85 │   │   │   │   loop = asyncio.get_running_loop()     │
+         │                                                             │
+         │ /Users/kh03/work/repos/myflow/example.py:31 in              │
+         │ failing_asset                                               │
+         │                                                             │
+         │   28 @asset(deps=["users"])                                 │
+         │   29 async def failing_asset(users: list[str]):             │
+         │   30 │   """This asset always fails."""                     │
+         │ ❱ 31 │   raise ValueError("This asset is designed to fail." │
+         │   32                                                        │
+         │   33                                                        │
+         │   34 if __name__ == "__main__":                             │
+         ╰─────────────────────────────────────────────────────────────╯
+         ValueError: This asset is designed to fail.                    
+╭─────────────────────────────── Assets ───────────────────────────────╮
+│ ✓ users                          (0.00s)                             │
+│ ✓ greetings                      (0.00s)                             │
+│ ✗ failing_asset                  (0.04s)                             │
+╰──────────────────────────────────────────────────────────────────────╯
+Overall Progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3/3 0:00:00
+
 ```
