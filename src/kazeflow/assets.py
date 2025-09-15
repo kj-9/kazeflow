@@ -31,6 +31,7 @@ def asset(
 
     return decorator
 
+
 def get_asset(name: str) -> AssetMeta:
     """Retrieves an asset's metadata including its function, dependencies,
     and config schema."""
