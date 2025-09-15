@@ -12,6 +12,8 @@ This file outlines the development rules for this project when using Gemini.
 
 After any code changes, Gemini will automatically perform the following steps:
 
+use `make check` to run all of below:
+
 1.  **Format the code**: Run `ruff format .`
 2.  **Lint the code**: Run `ruff check . --fix`
 3.  **Type check the code**: Run `uv run ty check`
