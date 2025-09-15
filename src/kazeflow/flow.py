@@ -14,6 +14,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.tree import Tree
+from rich.traceback import Traceback
 
 from .assets import get_asset
 from .logger import get_logger
@@ -87,21 +88,34 @@ class Flow:
         ts = TopologicalSorter(self.graph)
         return ts
 
-    def _execute_asset(self, asset_name: str, live: Live) -> Any:
-        """Executes a single asset and its dependencies."""
+    def _execute_asset(self, asset_name: str, live: Live) -> bool:
+        """Executes a single asset.
 
-        live.console.log(f"Executing asset: {asset_name}")
-        asset = get_asset(asset_name)
-        asset["func"]()
-        live.console.log(f"Finished executing asset: {asset_name}")
+        Returns:
+            bool: True if the asset executed successfully, False otherwise.
+        """
+        try:
+            live.console.log(f"Executing asset: {asset_name}")
+            asset = get_asset(asset_name)
+            asset["func"]()
+            live.console.log(f"Finished executing asset: {asset_name}")
+            return True
+        except Exception:
+            live.console.log(f"[bold red]Error executing asset {asset_name}[/bold red]")
+            live.console.print(Traceback(show_locals=True))
+            return False
 
     async def _execute_asset_async(self, asset_name: str, live: Live) -> Any:
         """Asynchronously executes a single asset and its dependencies."""
-
-        live.console.log(f"Executing asset: {asset_name}")
-        asset = get_asset(asset_name)
-        await asset["func"]()
-        live.console.log(f"Finished executing asset: {asset_name}")
+        try:
+            live.console.log(f"Executing asset: {asset_name}")
+            asset = get_asset(asset_name)
+            await asset["func"]()
+            live.console.log(f"Finished executing asset: {asset_name}")
+        except Exception:
+            live.console.log(f"[bold red]Error executing asset {asset_name}[/bold red]")
+            live.console.print(Traceback(show_locals=True))
+            raise
 
     def run_sync(self, config: Optional[dict[str, Any]] = None) -> None:
         """Executes the assets in the flow with a progress bar."""
@@ -110,9 +124,11 @@ class Flow:
 
         ts = self._get_ts()
         static_order = list(ts.static_order())
-
         completed_progress = Progress(
             TextColumn("✓ [green]{task.description}"),
+        )
+        failed_progress = Progress(
+            TextColumn("✗ [red]{task.description}"),
         )
         running_progress = Progress(
             TextColumn("  [purple]Running: {task.description}"),
@@ -127,7 +143,10 @@ class Flow:
         )
 
         progress_group = Group(
-            Panel(Group(completed_progress, running_progress), title="Assets"),
+            Panel(
+                Group(completed_progress, failed_progress, running_progress),
+                title="Assets",
+            ),
             overall_progress,
         )
 
@@ -140,10 +159,18 @@ class Flow:
 
             for asset_name in static_order:
                 task_id = running_progress.add_task(asset_name, total=1)
-                self._execute_asset(asset_name, live)
+                success = self._execute_asset(asset_name, live)
                 running_progress.stop_task(task_id)
                 running_progress.update(task_id, visible=False)
-                completed_progress.add_task(asset_name)
+
+                if success:
+                    completed_progress.add_task(asset_name)
+                else:
+                    failed_progress.add_task(asset_name)
+                    live.console.log(
+                        f"[bold red]Asset '{asset_name}' failed. Stopping workflow.[/bold red]"
+                    )
+                    break
                 overall_progress.update(overall_task_id, advance=1)
 
     async def run_async(self, config: Optional[dict[str, Any]] = None) -> list[str]:
@@ -157,6 +184,9 @@ class Flow:
         completed_progress = Progress(
             TextColumn("✓ [green]{task.description}"),
         )
+        failed_progress = Progress(
+            TextColumn("✗ [red]{task.description}"),
+        )
         running_progress = Progress(
             TextColumn("  [purple]Running: {task.description}"),
             SpinnerColumn("simpleDots"),
@@ -170,7 +200,10 @@ class Flow:
         )
 
         progress_group = Group(
-            Panel(Group(completed_progress, running_progress), title="Assets"),
+            Panel(
+                Group(completed_progress, failed_progress, running_progress),
+                title="Assets",
+            ),
             overall_progress,
         )
 
@@ -198,18 +231,26 @@ class Flow:
                     running_progress.stop_task(progress_task_id)
                     running_progress.update(progress_task_id, visible=False)
 
-                    completed_progress.add_task(f"{asset_name}")
+                    exc = task.exception()
+                    if exc:
+                        failed_progress.add_task(asset_name)
+                        # Do not call ts.done(), so dependencies won't run
+                    else:
+                        completed_progress.add_task(f"{asset_name}")
+                        ts.done(asset_name)
+                        newly_ready = ts.get_ready()
+                        for name in newly_ready:
+                            new_progress_task_id = running_progress.add_task(
+                                name, total=1
+                            )
+                            new_async_task = asyncio.create_task(
+                                self._execute_asset_async(name, live)
+                            )
+                            running_tasks_map[new_async_task] = (
+                                name,
+                                new_progress_task_id,
+                            )
 
                     overall_progress.update(overall_task_id, advance=1)
-
-                    ts.done(asset_name)
-
-                    newly_ready = ts.get_ready()
-                    for name in newly_ready:
-                        new_progress_task_id = running_progress.add_task(name, total=1)
-                        new_async_task = asyncio.create_task(
-                            self._execute_asset_async(name, live)
-                        )
-                        running_tasks_map[new_async_task] = (name, new_progress_task_id)
 
         return records
