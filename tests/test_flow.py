@@ -12,28 +12,6 @@ def setup_assets():
     clear_assets()
 
 
-def test_run_flow_sync():
-    """Tests the synchronous execution of a flow."""
-
-    @asset()
-    def first():
-        time.sleep(0.01)
-        return "first"
-
-    @asset(deps=["first"])
-    def second():
-        time.sleep(0.01)
-        return "second after first"
-
-    @asset(deps=["second"])
-    def third():
-        time.sleep(0.01)
-        return "third after second"
-
-    flow = Flow(asset_names=["third"])
-    flow.run_sync()
-
-
 @pytest.mark.asyncio
 async def test_run_flow_async():
     """Tests the asynchronous execution of a flow."""
@@ -98,29 +76,6 @@ async def test_asset_io():
     await flow.run_async()
 
     assert flow.asset_outputs["third"] == "hello world!"
-
-
-def test_run_sync_failure():
-    """Tests that the synchronous flow stops upon asset failure."""
-    execution_tracker = []
-
-    @asset()
-    def asset_a():
-        execution_tracker.append("a")
-
-    @asset(deps=["asset_a"])
-    def asset_b():
-        execution_tracker.append("b")
-        raise ValueError("Failure in B")
-
-    @asset(deps=["asset_b"])
-    def asset_c():
-        execution_tracker.append("c")
-
-    flow = Flow(asset_names=["asset_c"])
-    flow.run_sync()
-
-    assert execution_tracker == ["a", "b"]
 
 
 @pytest.mark.asyncio

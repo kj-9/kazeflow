@@ -52,47 +52,11 @@ class Flow:
 
         return TopologicalSorter(self.graph)
 
-    def _execute_asset(self, asset_name: str, live: Live) -> bool:
-        """Executes a single asset.
-
-        Returns:
-            bool: True if the asset executed successfully, False otherwise.
+    async def _execute_asset(self, asset_name: str, live: Live) -> None:
         """
-        try:
-            live.console.log(f"Executing asset: {asset_name}")
-            asset = get_asset(asset_name)
-
-            asset_func = asset["func"]
-            deps = asset["deps"]
-
-            # Only pass outputs that are actual parameters of the asset function
-            sig = inspect.signature(asset_func)
-            params = sig.parameters
-            input_kwargs = {
-                dep: self.asset_outputs[dep]
-                for dep in deps
-                if dep in self.asset_outputs and dep in params
-            }
-
-            if asyncio.iscoroutinefunction(asset_func):
-                live.console.log(
-                    f"[bold red]Cannot run async asset '{asset_name}' in run_sync. "
-                    "Please use run_async.[/bold red]"
-                )
-                return False
-
-            output = asset_func(**input_kwargs)
-            self.asset_outputs[asset_name] = output
-
-            live.console.log(f"Finished executing asset: {asset_name}")
-            return True
-        except Exception:
-            live.console.log(f"[bold red]Error executing asset {asset_name}[/bold red]")
-            live.console.print(Traceback(show_locals=True))
-            return False
-
-    async def _execute_asset_async(self, asset_name: str, live: Live) -> Any:
-        """Asynchronously executes a single asset and its dependencies."""
+        Asynchronously executes a single asset, handling I/O and errors.
+        Raises an exception on failure.
+        """
         try:
             live.console.log(f"Executing asset: {asset_name}")
             asset = get_asset(asset_name)
@@ -112,57 +76,38 @@ class Flow:
             if asyncio.iscoroutinefunction(asset_func):
                 output = await asset_func(**input_kwargs)
             else:
-                # Run sync function in a thread pool executor to avoid blocking the event loop
+                # Run sync function in a thread pool executor
                 loop = asyncio.get_running_loop()
-                # functools.partial is needed to pass keyword arguments to run_in_executor
                 import functools
 
                 p = functools.partial(asset_func, **input_kwargs)
                 output = await loop.run_in_executor(None, p)
 
             self.asset_outputs[asset_name] = output
-
             live.console.log(f"Finished executing asset: {asset_name}")
         except Exception:
             live.console.log(f"[bold red]Error executing asset {asset_name}[/bold red]")
             live.console.print(Traceback(show_locals=True))
             raise
 
-    def run_sync(self, config: Optional[dict[str, Any]] = None) -> None:
-        """Executes the assets in the flow synchronously."""
-        show_flow_tree(self.graph)
-        static_order = self.static_order
-
-        tui = FlowTUIRenderer(total_assets=len(static_order))
-        with tui as live:
-            for asset_name in static_order:
-                task_id = tui.add_running_task(asset_name)
-                success = self._execute_asset(asset_name, live)
-                tui.complete_running_task(task_id, asset_name, success)
-
-                if not success:
-                    live.console.log(
-                        f"[bold red]Asset '{asset_name}' failed. Stopping workflow.[/bold red]"
-                    )
-                    break
-
-    async def run_async(self, config: Optional[dict[str, Any]] = None) -> list[str]:
+    async def run_async(self, config: Optional[dict[str, Any]] = None) -> None:
         """Executes the assets in the flow asynchronously."""
         show_flow_tree(self.graph)
         ts = self._get_ts()
         ts.prepare()
-        records = []
 
         tui = FlowTUIRenderer(total_assets=len(self.static_order))
         running_tasks_map: dict[asyncio.Task, tuple[str, int]] = {}
 
         with tui as live:
-            ready_to_run = ts.get_ready()
-            for name in ready_to_run:
-                progress_task_id = tui.add_running_task(name)
-                async_task = asyncio.create_task(self._execute_asset_async(name, live))
-                running_tasks_map[async_task] = (name, progress_task_id)
+            # Initial scheduling
+            ready_to_run = list(ts.get_ready())
+            for asset_name in ready_to_run:
+                progress_task_id = tui.add_running_task(asset_name)
+                async_task = asyncio.create_task(self._execute_asset(asset_name, live))
+                running_tasks_map[async_task] = (asset_name, progress_task_id)
 
+            # Main execution loop
             while running_tasks_map:
                 done, _ = await asyncio.wait(
                     running_tasks_map.keys(), return_when=asyncio.FIRST_COMPLETED
@@ -170,22 +115,26 @@ class Flow:
 
                 for task in done:
                     asset_name, progress_task_id = running_tasks_map.pop(task)
-                    exc = task.exception()
-                    success = exc is None
+
+                    try:
+                        task.result()  # Re-raises exception on failure
+                        success = True
+                    except Exception:
+                        success = False
 
                     tui.complete_running_task(progress_task_id, asset_name, success)
 
                     if success:
                         ts.done(asset_name)
+                        # Schedule new tasks that are now ready
                         newly_ready = ts.get_ready()
-                        for name in newly_ready:
-                            new_progress_task_id = tui.add_running_task(name)
+                        for new_asset_name in newly_ready:
+                            new_progress_task_id = tui.add_running_task(new_asset_name)
                             new_async_task = asyncio.create_task(
-                                self._execute_asset_async(name, live)
+                                self._execute_asset(new_asset_name, live)
                             )
                             running_tasks_map[new_async_task] = (
-                                name,
+                                new_asset_name,
                                 new_progress_task_id,
                             )
 
-        return records
