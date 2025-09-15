@@ -38,3 +38,11 @@ def get_asset(name: str) -> AssetMeta:
     if name not in _assets:
         raise ValueError(f"Asset '{name}' not found.")
     return _assets[name]
+
+
+def clear_assets() -> None:
+    """Clears all registered assets.
+
+    This is useful for testing purposes.
+    """
+    _assets.clear()

@@ -3,7 +3,14 @@ from graphlib import TopologicalSorter
 from typing import Any, Optional
 
 from rich.tree import Tree
-from rich.progress import Progress
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from .assets import get_asset
 from .logger import get_logger
@@ -50,18 +57,26 @@ class Flow:
 
     def _get_ts(self) -> TopologicalSorter:
         """Sets up the topological sorter based on asset dependencies."""
-        graph = {}
+        graph: dict[str, set[str]] = {}
 
-        for asset_name in self.asset_names:
+        queue = list(self.asset_names)
+        visited = set()
+
+        while queue:
+            asset_name = queue.pop(0)
+            if asset_name in visited:
+                continue
+            visited.add(asset_name)
+
             asset = get_asset(asset_name)
-            graph[asset_name] = set(asset["deps"])
+            deps = set(asset["deps"])
+            graph[asset_name] = deps
 
-            for dep in asset["deps"]:
-                if dep not in graph:
-                    dep_asset = get_asset(dep)
-                    graph[dep] = set(dep_asset["deps"])
+            for dep in deps:
+                queue.append(dep)
 
-        ts = TopologicalSorter(graph)
+        self.graph = graph
+        ts = TopologicalSorter(self.graph)
         return ts
 
     def _execute_asset(
@@ -78,13 +93,14 @@ class Flow:
     async def _execute_asset_async(
         self,
         asset_name: str,
+        progress: Progress,
     ) -> Any:
         """Asynchronously executes a single asset and its dependencies."""
 
-        logger.info(f"Executing asset: {asset_name}")
+        progress.log(f"Executing asset: {asset_name}")
         asset = get_asset(asset_name)
         await asset["func"]()
-        logger.info(f"Finished executing asset: {asset_name}")
+        progress.log(f"Finished executing asset: {asset_name}")
 
     def run_sync(self, config: Optional[dict[str, Any]] = None) -> None:
         """Executes the assets in the flow with a progress bar."""
@@ -108,35 +124,53 @@ class Flow:
         self, config: Optional[dict[str, Any]] = None, num_workers=3
     ) -> list[str]:
         ts = self._get_ts()
+        all_assets = list(TopologicalSorter(self.graph).static_order())
         ts.prepare()
         records = []
 
-        with Progress() as progress:
-            tasks_progress = {
-                asset_name: progress.add_task(
-                    f"[cyan]Executing {asset_name}[/cyan]", total=1
-                )
-                for asset_name in ts.get_ready()
+        progress_columns = [
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+        ]
+
+        with Progress(*progress_columns) as progress:
+            total_task = progress.add_task("Overall progress", total=len(all_assets))
+
+            # Individual tasks, initially not started
+            individual_tasks = {
+                name: progress.add_task(name, start=False, total=1, transient=True)
+                for name in all_assets
             }
 
-            running = {
-                asyncio.create_task(get_asset(n)["func"]()): n for n in ts.get_ready()
+            ready_to_run = ts.get_ready()
+            for name in ready_to_run:
+                progress.start_task(individual_tasks[name])
+
+            running_tasks = {
+                asyncio.create_task(self._execute_asset_async(name, progress)): name
+                for name in ready_to_run
             }
 
-            while running:
+            while running_tasks:
                 done, _ = await asyncio.wait(
-                    running.keys(), return_when=asyncio.FIRST_COMPLETED
+                    running_tasks.keys(), return_when=asyncio.FIRST_COMPLETED
                 )
 
-                for d in done:
-                    name = running.pop(d)
-                    progress.update(tasks_progress[name], advance=1)
-                    ts.done(name)
-                    for new in ts.get_ready():
-                        if new not in tasks_progress:
-                            tasks_progress[new] = progress.add_task(
-                                f"[cyan]Executing {new}[/cyan]", total=1
-                            )
-                        running[asyncio.create_task(get_asset(new)["func"]())] = new
+                for task in done:
+                    asset_name = running_tasks.pop(task)
+                    progress.update(individual_tasks[asset_name], completed=1)
+                    progress.update(total_task, advance=1)
+
+                    ts.done(asset_name)
+
+                    newly_ready = ts.get_ready()
+                    for name in newly_ready:
+                        progress.start_task(individual_tasks[name])
+                        new_task = asyncio.create_task(
+                            self._execute_asset_async(name, progress)
+                        )
+                        running_tasks[new_task] = name
 
         return records
