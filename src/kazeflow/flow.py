@@ -18,17 +18,17 @@ logger = get_logger(__name__)
 class Flow:
     """A class representing a workflow of assets."""
 
-    graph: dict[str, set[str]]
-    ts: TopologicalSorter
-    static_order: list[str]
-
     def __init__(self, asset_names: list[str]):
         self.asset_names = asset_names
         self.asset_outputs: dict[str, Any] = {}
 
+        self.graph = self._get_graph()
+
+        ts = self._get_ts()
+        self.static_order = list(ts.static_order())
+
     def show_flow_tree(self) -> None:
         """Displays the task flow as a rich tree, in execution order."""
-        self._get_ts()
         graph = self.graph
 
         # Reverse the graph to show data flow from dependencies to dependents
@@ -58,8 +58,8 @@ class Flow:
 
         Console().print(tree)
 
-    def _get_ts(self) -> TopologicalSorter:
-        """Sets up the topological sorter based on asset dependencies."""
+    def _get_graph(self) -> dict[str, set[str]]:
+        """Sets up the graph based on asset dependencies."""
         graph: dict[str, set[str]] = {}
 
         queue = list(self.asset_names)
@@ -78,9 +78,12 @@ class Flow:
             for dep in deps:
                 queue.append(dep)
 
-        self.graph = graph
-        ts = TopologicalSorter(self.graph)
-        return ts
+        return graph
+
+    def _get_ts(self) -> TopologicalSorter:
+        """Sets up the topological sorter based on asset dependencies."""
+
+        return TopologicalSorter(self.graph)
 
     def _execute_asset(self, asset_name: str, live: Live) -> bool:
         """Executes a single asset.
@@ -162,7 +165,7 @@ class Flow:
         """Executes the assets in the flow synchronously."""
         self.show_flow_tree()
         ts = self._get_ts()
-        static_order = list(ts.static_order())
+        static_order = self.static_order
 
         tui = FlowTUIRenderer(total_assets=len(static_order))
         with tui as live:
@@ -181,11 +184,10 @@ class Flow:
         """Executes the assets in the flow asynchronously."""
         self.show_flow_tree()
         ts = self._get_ts()
-        all_assets = list(TopologicalSorter(self.graph).static_order())
         ts.prepare()
         records = []
 
-        tui = FlowTUIRenderer(total_assets=len(all_assets))
+        tui = FlowTUIRenderer(total_assets=len(self.static_order))
         running_tasks_map: dict[asyncio.Task, tuple[str, int]] = {}
 
         with tui as live:

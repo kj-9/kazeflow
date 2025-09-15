@@ -149,5 +149,3 @@ async def test_run_async_failure():
     assert "failing" in execution_tracker
     assert "successful" in execution_tracker
     assert "after_failure" not in execution_tracker
-
-
