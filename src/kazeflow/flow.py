@@ -2,6 +2,9 @@ import asyncio
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
+from rich.tree import Tree
+from rich.progress import Progress
+
 from .assets import get_asset
 from .logger import get_logger
 
@@ -17,6 +20,33 @@ class Flow:
 
     def __init__(self, asset_names: list[str]):
         self.asset_names = asset_names
+
+    def show_flow_tree(self) -> None:
+        """Displays the task flow as a rich tree."""
+        ts = self._get_ts()
+        graph = ts.graph
+
+        # Find root nodes (nodes with no dependencies)
+        all_deps = set()
+        for deps in graph.values():
+            all_deps.update(deps)
+        root_nodes = [node for node in graph.keys() if node not in all_deps]
+
+        tree = Tree("[bold green]Task Flow[/bold green]")
+        added_nodes = set()
+
+        def add_to_tree(parent_tree, node_name):
+            if node_name in added_nodes:
+                return
+            added_nodes.add(node_name)
+            node_tree = parent_tree.add(node_name)
+            for dep in graph.get(node_name, []):
+                add_to_tree(node_tree, dep)
+
+        for root in root_nodes:
+            add_to_tree(tree, root)
+
+        print(tree)
 
     def _get_ts(self) -> TopologicalSorter:
         """Sets up the topological sorter based on asset dependencies."""
@@ -57,13 +87,22 @@ class Flow:
         logger.info(f"Finished executing asset: {asset_name}")
 
     def run_sync(self, config: Optional[dict[str, Any]] = None) -> None:
-        """Executes the assets in the flow."""
+        """Executes the assets in the flow with a progress bar."""
 
         ts = self._get_ts()
         static_order = list(ts.static_order())
 
-        for asset_name in static_order:
-            self._execute_asset(asset_name)
+        with Progress() as progress:
+            tasks = {
+                asset_name: progress.add_task(
+                    f"[cyan]Executing {asset_name}[/cyan]", total=1
+                )
+                for asset_name in static_order
+            }
+
+            for asset_name in static_order:
+                self._execute_asset(asset_name)
+                progress.update(tasks[asset_name], advance=1)
 
     async def run_async(
         self, config: Optional[dict[str, Any]] = None, num_workers=3
@@ -71,20 +110,33 @@ class Flow:
         ts = self._get_ts()
         ts.prepare()
         records = []
-        running = {
-            asyncio.create_task(get_asset(n)["func"]()): n for n in ts.get_ready()
-        }
-        print(running)
 
-        while running:
-            done, _ = await asyncio.wait(
-                running.keys(), return_when=asyncio.FIRST_COMPLETED
-            )
+        with Progress() as progress:
+            tasks_progress = {
+                asset_name: progress.add_task(
+                    f"[cyan]Executing {asset_name}[/cyan]", total=1
+                )
+                for asset_name in ts.get_ready()
+            }
 
-            for d in done:
-                name = running.pop(d)
-                ts.done(name)
-                for new in ts.get_ready():
-                    running[asyncio.create_task(get_asset(new)["func"]())] = new
+            running = {
+                asyncio.create_task(get_asset(n)["func"]()): n for n in ts.get_ready()
+            }
+
+            while running:
+                done, _ = await asyncio.wait(
+                    running.keys(), return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for d in done:
+                    name = running.pop(d)
+                    progress.update(tasks_progress[name], advance=1)
+                    ts.done(name)
+                    for new in ts.get_ready():
+                        if new not in tasks_progress:
+                            tasks_progress[new] = progress.add_task(
+                                f"[cyan]Executing {new}[/cyan]", total=1
+                            )
+                        running[asyncio.create_task(get_asset(new)["func"]())] = new
 
         return records
