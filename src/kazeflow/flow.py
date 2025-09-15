@@ -90,8 +90,15 @@ class Flow:
             live.console.print(Traceback(show_locals=True))
             raise
 
-    async def run_async(self, config: Optional[dict[str, Any]] = None) -> None:
-        """Executes the assets in the flow asynchronously."""
+    async def run_async(
+        self,
+        config: Optional[dict[str, Any]] = None,
+        max_concurrency: Optional[int] = None,
+    ) -> None:
+        """Executes the assets in the flow asynchronously with a concurrency limit."""
+        if max_concurrency is not None and max_concurrency <= 0:
+            raise ValueError("max_concurrency must be a positive integer or None.")
+
         show_flow_tree(self.graph)
         ts = self._get_ts()
         ts.prepare()
@@ -100,15 +107,23 @@ class Flow:
         running_tasks_map: dict[asyncio.Task, tuple[str, int]] = {}
 
         with tui as live:
-            # Initial scheduling
-            ready_to_run = list(ts.get_ready())
-            for asset_name in ready_to_run:
-                progress_task_id = tui.add_running_task(asset_name)
-                async_task = asyncio.create_task(self._execute_asset(asset_name, live))
-                running_tasks_map[async_task] = (asset_name, progress_task_id)
+            while ts.is_active():
+                ready_to_run = list(ts.get_ready())
 
-            # Main execution loop
-            while running_tasks_map:
+                limit = max_concurrency if max_concurrency is not None else float("inf")
+
+                # Start new tasks if we have capacity and there are tasks ready to run
+                while len(running_tasks_map) < limit and ready_to_run:
+                    asset_name = ready_to_run.pop(0)
+                    progress_task_id = tui.add_running_task(asset_name)
+                    async_task = asyncio.create_task(
+                        self._execute_asset(asset_name, live)
+                    )
+                    running_tasks_map[async_task] = (asset_name, progress_task_id)
+
+                if not running_tasks_map:
+                    break  # Nothing running, nothing new to start
+
                 done, _ = await asyncio.wait(
                     running_tasks_map.keys(), return_when=asyncio.FIRST_COMPLETED
                 )
@@ -126,15 +141,4 @@ class Flow:
 
                     if success:
                         ts.done(asset_name)
-                        # Schedule new tasks that are now ready
-                        newly_ready = ts.get_ready()
-                        for new_asset_name in newly_ready:
-                            new_progress_task_id = tui.add_running_task(new_asset_name)
-                            new_async_task = asyncio.create_task(
-                                self._execute_asset(new_asset_name, live)
-                            )
-                            running_tasks_map[new_async_task] = (
-                                new_asset_name,
-                                new_progress_task_id,
-                            )
 

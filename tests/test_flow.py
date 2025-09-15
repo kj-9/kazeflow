@@ -106,3 +106,61 @@ async def test_run_async_failure():
     assert "failing" in execution_tracker
     assert "successful" in execution_tracker
     assert "after_failure" not in execution_tracker
+
+
+@pytest.mark.asyncio
+async def test_max_concurrency():
+    """Tests that max_concurrency is respected in run_async."""
+    running_count = 0
+    max_observed_concurrency = 0
+    lock = asyncio.Lock()
+
+    @asset()
+    async def start():
+        pass
+
+    @asset(deps=["start"])
+    async def a():
+        nonlocal running_count, max_observed_concurrency
+        async with lock:
+            running_count += 1
+            max_observed_concurrency = max(max_observed_concurrency, running_count)
+        await asyncio.sleep(0.1)
+        async with lock:
+            running_count -= 1
+
+    @asset(deps=["start"])
+    async def b():
+        nonlocal running_count, max_observed_concurrency
+        async with lock:
+            running_count += 1
+            max_observed_concurrency = max(max_observed_concurrency, running_count)
+        await asyncio.sleep(0.1)
+        async with lock:
+            running_count -= 1
+
+    @asset(deps=["start"])
+    async def c():
+        nonlocal running_count, max_observed_concurrency
+        async with lock:
+            running_count += 1
+            max_observed_concurrency = max(max_observed_concurrency, running_count)
+        await asyncio.sleep(0.1)
+        async with lock:
+            running_count -= 1
+
+    @asset(deps=["start"])
+    async def d():
+        nonlocal running_count, max_observed_concurrency
+        async with lock:
+            running_count += 1
+            max_observed_concurrency = max(max_observed_concurrency, running_count)
+        await asyncio.sleep(0.1)
+        async with lock:
+            running_count -= 1
+
+    flow = Flow(asset_names=["a", "b", "c", "d"])
+    await flow.run_async(max_concurrency=2)
+
+    assert max_observed_concurrency == 2
+
