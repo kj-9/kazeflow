@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 import pytest
 from kazeflow.assets import asset, clear_assets
@@ -163,4 +162,3 @@ async def test_max_concurrency():
     await flow.run_async(max_concurrency=2)
 
     assert max_observed_concurrency == 2
-
