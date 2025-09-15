@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Dict, Set
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -11,6 +11,38 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.tree import Tree
+
+
+def show_flow_tree(graph: Dict[str, Set[str]]) -> None:
+    """Displays the task flow as a rich tree, in execution order."""
+
+    # Reverse the graph to show data flow from dependencies to dependents
+    reversed_graph = {node: set() for node in graph}
+    for node, deps in graph.items():
+        for dep in deps:
+            if dep in reversed_graph:
+                reversed_graph[dep].add(node)
+
+    # Find root nodes (assets with no dependencies)
+    root_nodes = [node for node, deps in graph.items() if not deps]
+
+    tree = Tree("[bold green]Task Flow (Execution Order)[/bold green]")
+    added_nodes = set()
+
+    def add_to_tree(parent_tree: Tree, node_name: str) -> None:
+        if node_name in added_nodes:
+            return
+        added_nodes.add(node_name)
+        node_tree = parent_tree.add(node_name)
+        # Use reversed_graph to find nodes that depend on the current one
+        for dependent_node in sorted(list(reversed_graph.get(node_name, []))):
+            add_to_tree(node_tree, dependent_node)
+
+    for root in sorted(root_nodes):
+        add_to_tree(tree, root)
+
+    Console().print(tree)
 
 
 class FlowTUIRenderer:

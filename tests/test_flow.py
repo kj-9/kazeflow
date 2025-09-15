@@ -72,8 +72,10 @@ def test_show_flow_tree():
     def third(second):
         return f"third after {second}"
 
+    from kazeflow.tui import show_flow_tree
+
     flow = Flow(asset_names=["third"])
-    flow.show_flow_tree()
+    show_flow_tree(flow.graph)
 
 
 @pytest.mark.asyncio

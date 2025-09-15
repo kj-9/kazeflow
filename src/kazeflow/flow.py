@@ -3,14 +3,12 @@ import inspect
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-from rich.console import Console
 from rich.live import Live
-from rich.tree import Tree
 from rich.traceback import Traceback
 
 from .assets import get_asset
 from .logger import get_logger
-from .tui import FlowTUIRenderer
+from .tui import FlowTUIRenderer, show_flow_tree
 
 logger = get_logger(__name__)
 
@@ -26,37 +24,6 @@ class Flow:
 
         ts = self._get_ts()
         self.static_order = list(ts.static_order())
-
-    def show_flow_tree(self) -> None:
-        """Displays the task flow as a rich tree, in execution order."""
-        graph = self.graph
-
-        # Reverse the graph to show data flow from dependencies to dependents
-        reversed_graph = {node: set() for node in graph}
-        for node, deps in graph.items():
-            for dep in deps:
-                if dep in reversed_graph:
-                    reversed_graph[dep].add(node)
-
-        # Find root nodes (assets with no dependencies)
-        root_nodes = [node for node, deps in graph.items() if not deps]
-
-        tree = Tree("[bold green]Task Flow (Execution Order)[/bold green]")
-        added_nodes = set()
-
-        def add_to_tree(parent_tree, node_name):
-            if node_name in added_nodes:
-                return
-            added_nodes.add(node_name)
-            node_tree = parent_tree.add(node_name)
-            # Use reversed_graph to find nodes that depend on the current one
-            for dependent_node in sorted(list(reversed_graph.get(node_name, []))):
-                add_to_tree(node_tree, dependent_node)
-
-        for root in sorted(root_nodes):
-            add_to_tree(tree, root)
-
-        Console().print(tree)
 
     def _get_graph(self) -> dict[str, set[str]]:
         """Sets up the graph based on asset dependencies."""
@@ -163,8 +130,7 @@ class Flow:
 
     def run_sync(self, config: Optional[dict[str, Any]] = None) -> None:
         """Executes the assets in the flow synchronously."""
-        self.show_flow_tree()
-        ts = self._get_ts()
+        show_flow_tree(self.graph)
         static_order = self.static_order
 
         tui = FlowTUIRenderer(total_assets=len(static_order))
@@ -182,7 +148,7 @@ class Flow:
 
     async def run_async(self, config: Optional[dict[str, Any]] = None) -> list[str]:
         """Executes the assets in the flow asynchronously."""
-        self.show_flow_tree()
+        show_flow_tree(self.graph)
         ts = self._get_ts()
         ts.prepare()
         records = []
