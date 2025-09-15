@@ -13,6 +13,8 @@ from rich.progress import (
 )
 from rich.tree import Tree
 
+from .logger import get_logger
+
 
 def show_flow_tree(graph: Dict[str, Set[str]]) -> None:
     """Displays the task flow as a rich tree, in execution order."""
@@ -77,6 +79,7 @@ class FlowTUIRenderer:
             "Assets", total=total_assets
         )
         self.live = Live(self.progress_group)
+        self.logger = get_logger(__name__, console=self.live.console)
 
     def __enter__(self) -> Live:
         Console().print("\n[bold underline green]Execution Logs[/bold underline green]")

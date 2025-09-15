@@ -3,14 +3,11 @@ import inspect
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-from rich.live import Live
-from rich.traceback import Traceback
+import logging
+
 
 from .assets import get_asset
-from .logger import get_logger
 from .tui import FlowTUIRenderer, show_flow_tree
-
-logger = get_logger(__name__)
 
 
 class Flow:
@@ -52,13 +49,13 @@ class Flow:
 
         return TopologicalSorter(self.graph)
 
-    async def _execute_asset(self, asset_name: str, live: Live) -> None:
+    async def _execute_asset(self, asset_name: str, logger: logging.Logger) -> None:
         """
         Asynchronously executes a single asset, handling I/O and errors.
         Raises an exception on failure.
         """
         try:
-            live.console.log(f"Executing asset: {asset_name}")
+            logger.info(f"Executing asset: {asset_name}")
             asset = get_asset(asset_name)
 
             asset_func = asset["func"]
@@ -84,10 +81,9 @@ class Flow:
                 output = await loop.run_in_executor(None, p)
 
             self.asset_outputs[asset_name] = output
-            live.console.log(f"Finished executing asset: {asset_name}")
-        except Exception:
-            live.console.log(f"[bold red]Error executing asset {asset_name}[/bold red]")
-            live.console.print(Traceback(show_locals=True))
+            logger.info(f"Finished executing asset: {asset_name}")
+        except Exception as e:
+            logger.exception(f"Error executing asset {asset_name}: {e}")
             raise
 
     async def run_async(
@@ -106,7 +102,7 @@ class Flow:
         tui = FlowTUIRenderer(total_assets=len(self.static_order))
         running_tasks_map: dict[asyncio.Task, tuple[str, int]] = {}
 
-        with tui as live:
+        with tui:
             while ts.is_active():
                 ready_to_run = list(ts.get_ready())
 
@@ -117,7 +113,7 @@ class Flow:
                     asset_name = ready_to_run.pop(0)
                     progress_task_id = tui.add_running_task(asset_name)
                     async_task = asyncio.create_task(
-                        self._execute_asset(asset_name, live)
+                        self._execute_asset(asset_name, tui.logger)
                     )
                     running_tasks_map[async_task] = (asset_name, progress_task_id)
 
