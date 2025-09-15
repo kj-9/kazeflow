@@ -26,4 +26,4 @@ check:
 
 
 build:
-	uv build --frozen
+	uv build
