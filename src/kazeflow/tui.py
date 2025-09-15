@@ -81,12 +81,24 @@ class FlowTUIRenderer:
         )
         self.live = Live(self.progress_group)
         self.logger = get_logger(__name__, console=self.live.console)
+        self.results: list[AssetResult] = []
 
     def __enter__(self) -> Live:
         Console().print("\n[bold underline green]Execution Logs[/bold underline green]")
         return self.live.__enter__()
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        # Sort results by start time before final render
+        self.results.sort(key=lambda r: r.start_time)
+
+        # Now, populate the final progress bars
+        for result in self.results:
+            description = f"{result.name:<30} ({result.duration:.2f}s)"
+            if result.success:
+                self.completed_progress.add_task(description)
+            else:
+                self.failed_progress.add_task(description)
+
         return self.live.__exit__(exc_type, exc_val, exc_tb)
 
     def add_running_task(self, name: str) -> int:
@@ -94,14 +106,11 @@ class FlowTUIRenderer:
         return self.running_progress.add_task(name, total=1)
 
     def complete_running_task(self, task_id: int, result: AssetResult) -> None:
-        """Moves a task from running to either completed or failed."""
+        """Moves a task from running to a temporary list for later sorting."""
         self.running_progress.stop_task(task_id)
         self.running_progress.update(task_id, visible=False)
 
-        description = f"{result.name:<30} ({result.duration:.2f}s)"
+        # Store the result for final sorting
+        self.results.append(result)
 
-        if result.success:
-            self.completed_progress.add_task(description)
-        else:
-            self.failed_progress.add_task(description)
         self.overall_progress.update(self.overall_task_id, advance=1)

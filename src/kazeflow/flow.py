@@ -101,6 +101,7 @@ class Flow:
             name=asset_name,
             success=success,
             duration=duration,
+            start_time=start_time,
             output=output,
             exception=exception,
         )

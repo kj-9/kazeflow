@@ -9,5 +9,6 @@ class AssetResult:
     name: str
     success: bool
     duration: float
+    start_time: float
     output: Optional[Any] = None
     exception: Optional[Exception] = None
