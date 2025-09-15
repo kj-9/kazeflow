@@ -2,7 +2,7 @@ import asyncio
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-from rich.console import Group
+from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import (
@@ -32,17 +32,21 @@ class Flow:
         self.asset_names = asset_names
 
     def show_flow_tree(self) -> None:
-        """Displays the task flow as a rich tree."""
+        """Displays the task flow as a rich tree, in execution order."""
         self._get_ts()
         graph = self.graph
 
-        # Find root nodes (nodes with no dependencies)
-        all_deps = set()
-        for deps in graph.values():
-            all_deps.update(deps)
-        root_nodes = [node for node in graph.keys() if node not in all_deps]
+        # Reverse the graph to show data flow from dependencies to dependents
+        reversed_graph = {node: set() for node in graph}
+        for node, deps in graph.items():
+            for dep in deps:
+                if dep in reversed_graph:
+                    reversed_graph[dep].add(node)
 
-        tree = Tree("[bold green]Task Flow[/bold green]")
+        # Find root nodes (assets with no dependencies)
+        root_nodes = [node for node, deps in graph.items() if not deps]
+
+        tree = Tree("[bold green]Task Flow (Execution Order)[/bold green]")
         added_nodes = set()
 
         def add_to_tree(parent_tree, node_name):
@@ -50,13 +54,14 @@ class Flow:
                 return
             added_nodes.add(node_name)
             node_tree = parent_tree.add(node_name)
-            for dep in graph.get(node_name, []):
-                add_to_tree(node_tree, dep)
+            # Use reversed_graph to find nodes that depend on the current one
+            for dependent_node in sorted(list(reversed_graph.get(node_name, []))):
+                add_to_tree(node_tree, dependent_node)
 
-        for root in root_nodes:
+        for root in sorted(root_nodes):
             add_to_tree(tree, root)
 
-        print(tree)
+        Console().print(tree)
 
     def _get_ts(self) -> TopologicalSorter:
         """Sets up the topological sorter based on asset dependencies."""
@@ -101,6 +106,8 @@ class Flow:
     def run_sync(self, config: Optional[dict[str, Any]] = None) -> None:
         """Executes the assets in the flow with a progress bar."""
 
+        self.show_flow_tree()
+
         ts = self._get_ts()
         static_order = list(ts.static_order())
 
@@ -124,6 +131,8 @@ class Flow:
             overall_progress,
         )
 
+        Console().print("\n[bold underline green]Execution Logs[/bold underline green]")
+
         with Live(progress_group) as live:
             overall_task_id = overall_progress.add_task(
                 "Assets", total=len(static_order)
@@ -139,6 +148,7 @@ class Flow:
 
     async def run_async(self, config: Optional[dict[str, Any]] = None) -> list[str]:
         """Executes the assets in the flow with a progress bar."""
+        self.show_flow_tree()
         ts = self._get_ts()
         all_assets = list(TopologicalSorter(self.graph).static_order())
         ts.prepare()
@@ -165,6 +175,8 @@ class Flow:
         )
 
         running_tasks_map: dict[asyncio.Task, tuple[str, int]] = {}
+
+        Console().print("\n[bold underline green]Execution Logs[/bold underline green]")
 
         with Live(progress_group) as live:
             overall_task_id = overall_progress.add_task("Assets", total=len(all_assets))
