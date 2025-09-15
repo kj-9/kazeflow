@@ -162,3 +162,25 @@ async def test_max_concurrency():
     await flow.run_async(max_concurrency=2)
 
     assert max_observed_concurrency == 2
+
+
+@pytest.mark.asyncio
+async def test_asset_context_injection():
+    """Tests that the AssetContext is correctly injected."""
+    from kazeflow.context import AssetContext
+
+    result_log = []
+
+    @asset()
+    async def asset_with_context(context: AssetContext):
+        result_log.append(f"Hello from {context.asset_name}")
+
+    @asset()
+    async def asset_without_context():
+        # This asset should still run fine
+        pass
+
+    flow = Flow(asset_names=["asset_with_context", "asset_without_context"])
+    await flow.run_async()
+
+    assert "Hello from asset_with_context" in result_log

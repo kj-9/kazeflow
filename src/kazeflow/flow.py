@@ -6,6 +6,7 @@ from graphlib import TopologicalSorter
 from typing import Any, Optional
 
 from .assets import get_asset
+from .context import AssetContext
 from .result import AssetResult
 from .tui import FlowTUIRenderer, show_flow_tree
 
@@ -72,6 +73,10 @@ class Flow:
                 for dep in deps
                 if dep in self.asset_outputs and dep in params
             }
+
+            if "context" in params:
+                context = AssetContext(logger=logger, asset_name=asset_name)
+                input_kwargs["context"] = context
 
             if asyncio.iscoroutinefunction(asset_func):
                 output = await asset_func(**input_kwargs)
