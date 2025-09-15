@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
@@ -23,6 +24,7 @@ class Flow:
 
     def __init__(self, asset_names: list[str]):
         self.asset_names = asset_names
+        self.asset_outputs: dict[str, Any] = {}
 
     def show_flow_tree(self) -> None:
         """Displays the task flow as a rich tree, in execution order."""
@@ -89,7 +91,29 @@ class Flow:
         try:
             live.console.log(f"Executing asset: {asset_name}")
             asset = get_asset(asset_name)
-            asset["func"]()
+
+            asset_func = asset["func"]
+            deps = asset["deps"]
+
+            # Only pass outputs that are actual parameters of the asset function
+            sig = inspect.signature(asset_func)
+            params = sig.parameters
+            input_kwargs = {
+                dep: self.asset_outputs[dep]
+                for dep in deps
+                if dep in self.asset_outputs and dep in params
+            }
+
+            if asyncio.iscoroutinefunction(asset_func):
+                live.console.log(
+                    f"[bold red]Cannot run async asset '{asset_name}' in run_sync. "
+                    "Please use run_async.[/bold red]"
+                )
+                return False
+
+            output = asset_func(**input_kwargs)
+            self.asset_outputs[asset_name] = output
+
             live.console.log(f"Finished executing asset: {asset_name}")
             return True
         except Exception:
@@ -102,7 +126,32 @@ class Flow:
         try:
             live.console.log(f"Executing asset: {asset_name}")
             asset = get_asset(asset_name)
-            await asset["func"]()
+
+            asset_func = asset["func"]
+            deps = asset["deps"]
+
+            # Only pass outputs that are actual parameters of the asset function
+            sig = inspect.signature(asset_func)
+            params = sig.parameters
+            input_kwargs = {
+                dep: self.asset_outputs[dep]
+                for dep in deps
+                if dep in self.asset_outputs and dep in params
+            }
+
+            if asyncio.iscoroutinefunction(asset_func):
+                output = await asset_func(**input_kwargs)
+            else:
+                # Run sync function in a thread pool executor to avoid blocking the event loop
+                loop = asyncio.get_running_loop()
+                # functools.partial is needed to pass keyword arguments to run_in_executor
+                import functools
+
+                p = functools.partial(asset_func, **input_kwargs)
+                output = await loop.run_in_executor(None, p)
+
+            self.asset_outputs[asset_name] = output
+
             live.console.log(f"Finished executing asset: {asset_name}")
         except Exception:
             live.console.log(f"[bold red]Error executing asset {asset_name}[/bold red]")
