@@ -1,7 +1,7 @@
 [project]
 name = "kazeflow"
 version = "0.1.0a0"
-description = "Add your description here"
+description = "A lightweight, asset-based task flow engine"
 readme = "README.md"
 authors = [
     { name = "Kj", email = "46800811+kj-9@users.noreply.github.com" }
