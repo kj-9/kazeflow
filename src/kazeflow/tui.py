@@ -14,6 +14,7 @@ from rich.progress import (
 from rich.tree import Tree
 
 from .logger import get_logger
+from .result import AssetResult
 
 
 def show_flow_tree(graph: Dict[str, Set[str]]) -> None:
@@ -92,12 +93,15 @@ class FlowTUIRenderer:
         """Adds a task to the running progress bar."""
         return self.running_progress.add_task(name, total=1)
 
-    def complete_running_task(self, task_id: int, name: str, success: bool) -> None:
+    def complete_running_task(self, task_id: int, result: AssetResult) -> None:
         """Moves a task from running to either completed or failed."""
         self.running_progress.stop_task(task_id)
         self.running_progress.update(task_id, visible=False)
-        if success:
-            self.completed_progress.add_task(name)
+
+        description = f"{result.name:<30} ({result.duration:.2f}s)"
+
+        if result.success:
+            self.completed_progress.add_task(description)
         else:
-            self.failed_progress.add_task(name)
+            self.failed_progress.add_task(description)
         self.overall_progress.update(self.overall_task_id, advance=1)

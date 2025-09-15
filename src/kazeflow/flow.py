@@ -1,12 +1,12 @@
 import asyncio
 import inspect
+import logging
+import time
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-import logging
-
-
 from .assets import get_asset
+from .result import AssetResult
 from .tui import FlowTUIRenderer, show_flow_tree
 
 
@@ -49,11 +49,14 @@ class Flow:
 
         return TopologicalSorter(self.graph)
 
-    async def _execute_asset(self, asset_name: str, logger: logging.Logger) -> None:
-        """
-        Asynchronously executes a single asset, handling I/O and errors.
-        Raises an exception on failure.
-        """
+    async def _execute_asset(
+        self, asset_name: str, logger: logging.Logger
+    ) -> AssetResult:
+        """Executes an asset and returns a result object."""
+        start_time = time.monotonic()
+        output = None
+        exception = None
+        success = False
         try:
             logger.info(f"Executing asset: {asset_name}")
             asset = get_asset(asset_name)
@@ -79,12 +82,23 @@ class Flow:
 
                 p = functools.partial(asset_func, **input_kwargs)
                 output = await loop.run_in_executor(None, p)
+            success = True
 
-            self.asset_outputs[asset_name] = output
-            logger.info(f"Finished executing asset: {asset_name}")
         except Exception as e:
+            exception = e
             logger.exception(f"Error executing asset {asset_name}: {e}")
-            raise
+
+        duration = time.monotonic() - start_time
+        if success:
+            logger.info(f"Finished executing asset: {asset_name} in {duration:.2f}s")
+
+        return AssetResult(
+            name=asset_name,
+            success=success,
+            duration=duration,
+            output=output,
+            exception=exception,
+        )
 
     async def run_async(
         self,
@@ -127,13 +141,10 @@ class Flow:
                 for task in done:
                     asset_name, progress_task_id = running_tasks_map.pop(task)
 
-                    try:
-                        task.result()  # Re-raises exception on failure
-                        success = True
-                    except Exception:
-                        success = False
+                    asset_result: AssetResult = task.result()
 
-                    tui.complete_running_task(progress_task_id, asset_name, success)
+                    tui.complete_running_task(progress_task_id, asset_result)
 
-                    if success:
+                    if asset_result.success:
+                        self.asset_outputs[asset_name] = asset_result.output
                         ts.done(asset_name)
