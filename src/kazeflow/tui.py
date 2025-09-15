@@ -1,0 +1,68 @@
+from typing import Any
+
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+
+
+class FlowTUIRenderer:
+    """Manages the Text-based User Interface for flow execution using rich."""
+
+    def __init__(self, total_assets: int):
+        self.completed_progress = Progress(TextColumn("✓ [green]{task.description}"))
+        self.failed_progress = Progress(TextColumn("✗ [red]{task.description}"))
+        self.running_progress = Progress(
+            TextColumn("  [purple]Running: {task.description}"),
+            SpinnerColumn("simpleDots"),
+            TimeElapsedColumn(),
+        )
+        self.overall_progress = Progress(
+            TextColumn("[bold blue]Overall Progress"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+        )
+        self.progress_group = Group(
+            Panel(
+                Group(
+                    self.completed_progress,
+                    self.failed_progress,
+                    self.running_progress,
+                ),
+                title="Assets",
+            ),
+            self.overall_progress,
+        )
+        self.overall_task_id = self.overall_progress.add_task(
+            "Assets", total=total_assets
+        )
+        self.live = Live(self.progress_group)
+
+    def __enter__(self) -> Live:
+        Console().print("\n[bold underline green]Execution Logs[/bold underline green]")
+        return self.live.__enter__()
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        return self.live.__exit__(exc_type, exc_val, exc_tb)
+
+    def add_running_task(self, name: str) -> int:
+        """Adds a task to the running progress bar."""
+        return self.running_progress.add_task(name, total=1)
+
+    def complete_running_task(self, task_id: int, name: str, success: bool) -> None:
+        """Moves a task from running to either completed or failed."""
+        self.running_progress.stop_task(task_id)
+        self.running_progress.update(task_id, visible=False)
+        if success:
+            self.completed_progress.add_task(name)
+        else:
+            self.failed_progress.add_task(name)
+        self.overall_progress.update(self.overall_task_id, advance=1)
