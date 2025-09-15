@@ -17,4 +17,6 @@ use `make check` to run all of below:
 1.  **Format the code**: Run `ruff format .`
 2.  **Lint the code**: Run `ruff check . --fix`
 3.  **Type check the code**: Run `uv run ty check`
+
+and `make test` for:
 4.  **Run tests**: Run `uv run pytest`

@@ -7,7 +7,6 @@ from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     Progress,
-    SpinnerColumn,
     TextColumn,
     TimeElapsedColumn,
 )
@@ -30,8 +29,8 @@ class Flow:
 
     def show_flow_tree(self) -> None:
         """Displays the task flow as a rich tree."""
-        ts = self._get_ts()
-        graph = ts.graph
+        self._get_ts()
+        graph = self.graph
 
         # Find root nodes (nodes with no dependencies)
         all_deps = set()
