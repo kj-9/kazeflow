@@ -20,3 +20,14 @@ use `make check` to run all of below:
 
 and `make test` for:
 4.  **Run tests**: Run `uv run pytest`
+
+## 3. Test-Driven Development (TDD)
+
+When fixing a bug or adding a new feature, the following TDD workflow should be followed:
+
+1.  **Add a Failing Test**: Before writing any implementation code, add a new test case that reproduces the bug or validates the new feature.
+2.  **Confirm Failure**: Run the test suite to ensure that the new test fails as expected and that the existing tests still pass.
+3.  **Implement the Change**: Write the necessary code to fix the bug or implement the feature.
+4.  **Confirm Success**: Run the entire test suite again to confirm that the new test case now passes and that all existing tests still pass.
+5.  **Code Quality Checks**: Run `make check` to ensure the code is well-formatted, linted, and passes type checks.
+6.  **Clean up**: The test case can be left as a regression test.
