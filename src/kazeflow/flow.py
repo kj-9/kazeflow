@@ -12,41 +12,11 @@ from .tui import FlowTUIRenderer, show_flow_tree
 class Flow:
     """A class representing a workflow of assets."""
 
-    def __init__(self, asset_names: list[str]):
-        self.asset_names = asset_names
+    def __init__(self, graph: dict[str, set[str]]):
+        self.graph = graph
         self.asset_outputs: dict[str, Any] = {}
 
-        self.graph = self._get_graph()
-
-        ts = self._get_ts()
-        self.static_order = list(ts.static_order())
-
-    def _get_graph(self) -> dict[str, set[str]]:
-        """Sets up the graph based on asset dependencies."""
-        graph: dict[str, set[str]] = {}
-
-        queue = list(self.asset_names)
-        visited = set()
-
-        while queue:
-            asset_name = queue.pop(0)
-            if asset_name in visited:
-                continue
-            visited.add(asset_name)
-
-            asset = get_asset(asset_name)
-            deps = set(asset["deps"])
-            graph[asset_name] = deps
-
-            for dep in deps:
-                queue.append(dep)
-
-        return graph
-
-    def _get_ts(self) -> TopologicalSorter:
-        """Sets up the topological sorter based on asset dependencies."""
-
-        return TopologicalSorter(self.graph)
+        self.static_order = list(TopologicalSorter(self.graph).static_order())
 
     async def _execute_asset(
         self, asset_name: str, logger: logging.Logger
@@ -114,7 +84,7 @@ class Flow:
             raise ValueError("max_concurrency must be a positive integer or None.")
 
         show_flow_tree(self.graph)
-        ts = self._get_ts()
+        ts = TopologicalSorter(self.graph)
         ts.prepare()
 
         tui = FlowTUIRenderer(total_assets=len(self.static_order))

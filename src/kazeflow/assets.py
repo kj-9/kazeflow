@@ -77,6 +77,29 @@ def clear_assets() -> None:
     _assets.clear()
 
 
+def build_graph(asset_names: list[str]) -> dict[str, set[str]]:
+    """Builds a dependency graph for a list of assets."""
+    graph: dict[str, set[str]] = {}
+
+    queue = list(asset_names)
+    visited = set()
+
+    while queue:
+        asset_name = queue.pop(0)
+        if asset_name in visited:
+            continue
+        visited.add(asset_name)
+
+        asset = get_asset(asset_name)
+        deps = set(asset["deps"])
+        graph[asset_name] = deps
+
+        for dep in deps:
+            queue.append(dep)
+
+    return graph
+
+
 @dataclass
 class AssetContext:
     """Holds contextual information for an asset's execution."""

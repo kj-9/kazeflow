@@ -15,8 +15,7 @@ example.py:
 ```python
 import asyncio
 
-from kazeflow.assets import asset
-from kazeflow.context import AssetContext
+from kazeflow.assets import asset, AssetContext, build_graph
 from kazeflow.flow import Flow
 
 
@@ -49,7 +48,9 @@ async def failing_asset(users: list[str]):
 if __name__ == "__main__":
     # Define a flow that includes the final assets we want to generate.
     # kazeflow automatically includes all upstream dependencies.
-    flow = Flow(asset_names=["greetings", "failing_asset"])
+    asset_names = ["greetings", "failing_asset"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
 
     # Run the flow asynchronously.
     # You can limit the number of concurrent assets with `max_concurrency`.

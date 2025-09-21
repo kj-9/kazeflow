@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from kazeflow.assets import asset, clear_assets
+from kazeflow.assets import asset, clear_assets, build_graph
 from kazeflow.flow import Flow
 
 
@@ -31,7 +31,9 @@ async def test_run_flow_async():
         await asyncio.sleep(0.01)
         return f"third after {second}"
 
-    flow = Flow(asset_names=["third"])
+    asset_names = ["third"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
     await flow.run_async()
 
 
@@ -52,7 +54,9 @@ def test_show_flow_tree():
 
     from kazeflow.tui import show_flow_tree
 
-    flow = Flow(asset_names=["third"])
+    asset_names = ["third"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
     show_flow_tree(flow.graph)
 
 
@@ -72,7 +76,9 @@ async def test_asset_io():
     async def third(second: str):
         return f"{second}!"
 
-    flow = Flow(asset_names=["third"])
+    asset_names = ["third"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
     await flow.run_async()
 
     assert flow.asset_outputs["third"] == "hello world!"
@@ -100,7 +106,9 @@ async def test_run_async_failure():
     async def successful_branch():
         execution_tracker.append("successful")
 
-    flow = Flow(asset_names=["after_failure", "successful_branch"])
+    asset_names = ["after_failure", "successful_branch"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
     await flow.run_async()
 
     assert "failing" in execution_tracker
@@ -159,7 +167,9 @@ async def test_max_concurrency():
         async with lock:
             running_count -= 1
 
-    flow = Flow(asset_names=["a", "b", "c", "d"])
+    asset_names = ["a", "b", "c", "d"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
     await flow.run_async(max_concurrency=2)
 
     assert max_observed_concurrency == 2
@@ -181,7 +191,9 @@ async def test_asset_context_injection():
         # This asset should still run fine
         pass
 
-    flow = Flow(asset_names=["asset_with_context", "asset_without_context"])
+    asset_names = ["asset_with_context", "asset_without_context"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
     await flow.run_async()
 
     assert "Hello from asset_with_context" in result_log
@@ -202,7 +214,9 @@ def test_merged_dependency_resolution():
     def target_asset(implicit_dep: str):
         pass
 
-    flow = Flow(asset_names=["target_asset"])
+    asset_names = ["target_asset"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
 
     assert "explicit_dep" in flow.graph["target_asset"]
     assert "implicit_dep" in flow.graph["target_asset"]
