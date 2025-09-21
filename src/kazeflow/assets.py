@@ -1,4 +1,4 @@
-from typing import Any, Optional, Protocol, TypedDict
+from typing import Any, Callable, Optional, Protocol, TypedDict, Union
 
 
 class NamedCallable(Protocol):
@@ -16,8 +16,10 @@ _assets: dict[str, AssetMeta] = {}
 
 
 def asset(
+    _func: Optional[NamedCallable] = None,
+    *,
     deps: Optional[list[str]] = None,
-):
+) -> Union[Callable[[NamedCallable], NamedCallable], NamedCallable]:
     """
     A decorator to define an asset, its dependencies, and its configuration schema.
     """
@@ -29,7 +31,10 @@ def asset(
         }
         return func
 
-    return decorator
+    if _func is None:
+        return decorator
+    else:
+        return decorator(_func)
 
 
 def get_asset(name: str) -> AssetMeta:
