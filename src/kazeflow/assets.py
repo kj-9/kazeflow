@@ -18,7 +18,80 @@ class Asset(TypedDict):
     partition_by: Optional[Any]
 
 
-_assets: dict[str, Asset] = {}
+@dataclass
+class AssetContext:
+    """Holds contextual information for an asset's execution."""
+
+    logger: logging.Logger
+    asset_name: str
+    partition_key: Optional[PartitionKey] = None
+
+
+class AssetRegistry:
+    """Manages the registration and retrieval of assets."""
+
+    def __init__(self):
+        self._assets: dict[str, Asset] = {}
+
+    def register(
+        self,
+        func: NamedCallable,
+        deps: Optional[list[str]] = None,
+        partition_by: Optional[PartitionKey] = None,
+    ):
+        """Registers an asset."""
+        resolved_deps = set(deps or [])
+
+        sig = inspect.signature(func)
+        for param in sig.parameters.values():
+            if param.name in ("context", "config", "partition_key"):
+                continue
+            if param.annotation is AssetContext:
+                continue
+            resolved_deps.add(param.name)
+
+        self._assets[func.__name__] = Asset(
+            {
+                "func": func,
+                "deps": list(resolved_deps),
+                "partition_by": partition_by,
+            }
+        )
+
+    def get(self, name: str) -> Asset:
+        """Retrieves an asset's metadata."""
+        if name not in self._assets:
+            raise ValueError(f"Asset '{name}' not found.")
+        return self._assets[name]
+
+    def clear(self) -> None:
+        """Clears all registered assets."""
+        self._assets.clear()
+
+    def build_graph(self, asset_names: list[str]) -> dict[str, set[str]]:
+        """Builds a dependency graph for a list of assets."""
+        graph: dict[str, set[str]] = {}
+        queue = list(asset_names)
+        visited = set()
+
+        while queue:
+            asset_name = queue.pop(0)
+            if asset_name in visited:
+                continue
+            visited.add(asset_name)
+
+            asset = self.get(asset_name)
+            deps = set(asset["deps"])
+            graph[asset_name] = deps
+
+            for dep in deps:
+                queue.append(dep)
+
+        return graph
+
+
+# Default global registry
+default_registry = AssetRegistry()
 
 
 def asset(
@@ -32,27 +105,7 @@ def asset(
     """
 
     def decorator(func: NamedCallable) -> NamedCallable:
-        # Start with explicit deps, or an empty list
-        resolved_deps = set(deps or [])
-
-        # Add implicit deps from signature
-        sig = inspect.signature(func)
-        for param in sig.parameters.values():
-            # Do not add special runtime-provided params to deps
-            if param.name in ("context", "config", "partition_key"):
-                continue
-            if param.annotation is AssetContext:
-                continue
-
-            resolved_deps.add(param.name)
-
-        _assets[func.__name__] = Asset(
-            {
-                "func": func,
-                "deps": list(resolved_deps),
-                "partition_by": partition_by,
-            }
-        )
+        default_registry.register(func, deps=deps, partition_by=partition_by)
         return func
 
     if _func is None:
@@ -64,9 +117,7 @@ def asset(
 def get_asset(name: str) -> Asset:
     """Retrieves an asset's metadata including its function, dependencies,
     and config schema."""
-    if name not in _assets:
-        raise ValueError(f"Asset '{name}' not found.")
-    return _assets[name]
+    return default_registry.get(name)
 
 
 def clear_assets() -> None:
@@ -74,39 +125,12 @@ def clear_assets() -> None:
 
     This is useful for testing purposes.
     """
-    _assets.clear()
+    default_registry.clear()
 
 
 def build_graph(asset_names: list[str]) -> dict[str, set[str]]:
     """Builds a dependency graph for a list of assets."""
-    graph: dict[str, set[str]] = {}
-
-    queue = list(asset_names)
-    visited = set()
-
-    while queue:
-        asset_name = queue.pop(0)
-        if asset_name in visited:
-            continue
-        visited.add(asset_name)
-
-        asset = get_asset(asset_name)
-        deps = set(asset["deps"])
-        graph[asset_name] = deps
-
-        for dep in deps:
-            queue.append(dep)
-
-    return graph
-
-
-@dataclass
-class AssetContext:
-    """Holds contextual information for an asset's execution."""
-
-    logger: logging.Logger
-    asset_name: str
-    partition_key: Optional[PartitionKey] = None
+    return default_registry.build_graph(asset_names)
 
 
 @dataclass

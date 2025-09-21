@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from kazeflow.assets import asset, AssetContext
+from kazeflow.assets import asset, AssetContext, build_graph
 from kazeflow.flow import Flow
 from kazeflow.partition import DatePartitionKey
 
@@ -40,7 +40,9 @@ async def summarize_results(
 
 if __name__ == "__main__":
     # Define a flow that includes the final asset we want to generate.
-    flow = Flow(asset_names=["summarize_results"])
+    asset_names = ["summarize_results"]
+    graph = build_graph(asset_names)
+    flow = Flow(graph)
 
     # Define a runtime configuration for the flow.
     # This config specifies that the `process_day` asset should be partitioned
