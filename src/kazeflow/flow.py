@@ -2,7 +2,7 @@ import asyncio
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-from .assets import AssetResult, default_registry
+from .assets import AssetContext, AssetResult, default_registry
 from .tui import FlowTUIRenderer, show_flow_tree
 
 
@@ -42,8 +42,9 @@ class Flow:
                     asset_name = ready_to_run.pop(0)
                     progress_task_id = tui.add_running_task(asset_name)
                     asset = default_registry.get(asset_name)
+                    context = AssetContext(logger=tui.logger, asset_name=asset_name)
                     async_task = asyncio.create_task(
-                        asset.execute(tui.logger, self.asset_outputs)
+                        asset.execute(context, self.asset_outputs)
                     )
                     running_tasks_map[async_task] = (asset_name, progress_task_id)
 

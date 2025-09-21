@@ -50,7 +50,7 @@ class Asset:
         self.name = func.__name__
 
     async def execute(
-        self, logger: logging.Logger, asset_outputs: dict[str, Any]
+        self, context: AssetContext, asset_outputs: dict[str, Any]
     ) -> AssetResult:
         """Executes the asset and returns a result object."""
         start_time = time.monotonic()
@@ -58,7 +58,7 @@ class Asset:
         exception = None
         success = False
         try:
-            logger.info(f"Executing asset: {self.name}")
+            context.logger.info(f"Executing asset: {self.name}")
 
             sig = inspect.signature(self.func)
             params = sig.parameters
@@ -69,7 +69,6 @@ class Asset:
             }
 
             if "context" in params:
-                context = AssetContext(logger=logger, asset_name=self.name)
                 input_kwargs["context"] = context
 
             if asyncio.iscoroutinefunction(self.func):
@@ -84,11 +83,13 @@ class Asset:
 
         except Exception as e:
             exception = e
-            logger.exception(f"Error executing asset {self.name}: {e}")
+            context.logger.exception(f"Error executing asset {self.name}: {e}")
 
         duration = time.monotonic() - start_time
         if success:
-            logger.info(f"Finished executing asset: {self.name} in {duration:.2f}s")
+            context.logger.info(
+                f"Finished executing asset: {self.name} in {duration:.2f}s"
+            )
 
         return AssetResult(
             name=self.name,
