@@ -1,4 +1,7 @@
+import inspect
 from typing import Any, Callable, Optional, Protocol, TypedDict, Union
+
+from .context import AssetContext
 
 
 class NamedCallable(Protocol):
@@ -25,9 +28,18 @@ def asset(
     """
 
     def decorator(func: NamedCallable) -> NamedCallable:
+        # Start with explicit deps, or an empty list
+        resolved_deps = set(deps or [])
+
+        # Add implicit deps from signature
+        sig = inspect.signature(func)
+        for param in sig.parameters.values():
+            if param.name != "context" and param.annotation is not AssetContext:
+                resolved_deps.add(param.name)
+
         _assets[func.__name__] = {
             "func": func,
-            "deps": deps or [],
+            "deps": list(resolved_deps),
         }
         return func
 
