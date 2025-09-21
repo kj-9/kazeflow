@@ -3,7 +3,7 @@ import logging
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-from .assets import get_asset, AssetResult
+from .assets import AssetResult, default_registry
 from .tui import FlowTUIRenderer, show_flow_tree
 
 
@@ -20,7 +20,7 @@ class Flow:
         self, asset_name: str, logger: logging.Logger
     ) -> AssetResult:
         """Executes an asset and returns a result object."""
-        asset = get_asset(asset_name)
+        asset = default_registry.get(asset_name)
         return await asset.execute(logger, self.asset_outputs)
 
     async def run_async(

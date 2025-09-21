@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from kazeflow.assets import asset, AssetContext, build_graph
+from kazeflow.assets import asset, AssetContext, default_registry
 from kazeflow.flow import Flow
 from kazeflow.partition import DatePartitionKey
 
@@ -41,7 +41,7 @@ async def summarize_results(
 if __name__ == "__main__":
     # Define a flow that includes the final asset we want to generate.
     asset_names = ["summarize_results"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
 
     # Define a runtime configuration for the flow.

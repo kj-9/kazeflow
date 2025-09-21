@@ -1,6 +1,6 @@
 import asyncio
 
-from kazeflow.assets import asset, build_graph
+from kazeflow.assets import asset, default_registry
 from kazeflow.flow import Flow
 
 
@@ -38,6 +38,6 @@ async def sixth(fifth, context):
 
 if __name__ == "__main__":
     asset_names = ["fourth", "third", "sixth"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     asyncio.run(flow.run_async())

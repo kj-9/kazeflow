@@ -184,21 +184,3 @@ def asset(
         return decorator
     else:
         return decorator(_func)
-
-
-def get_asset(name: str) -> Asset:
-    """Retrieves an asset object."""
-    return default_registry.get(name)
-
-
-def clear_assets() -> None:
-    """Clears all registered assets.
-
-    This is useful for testing purposes.
-    """
-    default_registry.clear()
-
-
-def build_graph(asset_names: list[str]) -> dict[str, set[str]]:
-    """Builds a dependency graph for a list of assets."""
-    return default_registry.build_graph(asset_names)

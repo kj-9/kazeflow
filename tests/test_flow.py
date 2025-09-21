@@ -2,14 +2,14 @@ import asyncio
 
 import pytest
 
-from kazeflow.assets import asset, clear_assets, build_graph
+from kazeflow.assets import asset, default_registry
 from kazeflow.flow import Flow
 
 
 @pytest.fixture(autouse=True)
 def setup_assets():
     """Clears assets before each test."""
-    clear_assets()
+    default_registry.clear()
 
 
 @pytest.mark.asyncio
@@ -32,7 +32,7 @@ async def test_run_flow_async():
         return f"third after {second}"
 
     asset_names = ["third"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     await flow.run_async()
 
@@ -55,7 +55,7 @@ def test_show_flow_tree():
     from kazeflow.tui import show_flow_tree
 
     asset_names = ["third"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     show_flow_tree(flow.graph)
 
@@ -77,7 +77,7 @@ async def test_asset_io():
         return f"{second}!"
 
     asset_names = ["third"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     await flow.run_async()
 
@@ -107,7 +107,7 @@ async def test_run_async_failure():
         execution_tracker.append("successful")
 
     asset_names = ["after_failure", "successful_branch"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     await flow.run_async()
 
@@ -168,7 +168,7 @@ async def test_max_concurrency():
             running_count -= 1
 
     asset_names = ["a", "b", "c", "d"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     await flow.run_async(max_concurrency=2)
 
@@ -192,7 +192,7 @@ async def test_asset_context_injection():
         pass
 
     asset_names = ["asset_with_context", "asset_without_context"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
     await flow.run_async()
 
@@ -215,7 +215,7 @@ def test_merged_dependency_resolution():
         pass
 
     asset_names = ["target_asset"]
-    graph = build_graph(asset_names)
+    graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
 
     assert "explicit_dep" in flow.graph["target_asset"]
