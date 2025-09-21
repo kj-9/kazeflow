@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
@@ -15,13 +14,6 @@ class Flow:
         self.asset_outputs: dict[str, Any] = {}
 
         self.static_order = list(TopologicalSorter(self.graph).static_order())
-
-    async def _execute_asset(
-        self, asset_name: str, logger: logging.Logger
-    ) -> AssetResult:
-        """Executes an asset and returns a result object."""
-        asset = default_registry.get(asset_name)
-        return await asset.execute(logger, self.asset_outputs)
 
     async def run_async(
         self,
@@ -49,8 +41,9 @@ class Flow:
                 while len(running_tasks_map) < limit and ready_to_run:
                     asset_name = ready_to_run.pop(0)
                     progress_task_id = tui.add_running_task(asset_name)
+                    asset = default_registry.get(asset_name)
                     async_task = asyncio.create_task(
-                        self._execute_asset(asset_name, tui.logger)
+                        asset.execute(tui.logger, self.asset_outputs)
                     )
                     running_tasks_map[async_task] = (asset_name, progress_task_id)
 
