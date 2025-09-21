@@ -1,6 +1,8 @@
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
+from .partition import PartitionKey
 
 @dataclass
 class AssetContext:
@@ -8,3 +10,4 @@ class AssetContext:
 
     logger: logging.Logger
     asset_name: str
+    partition_key: Optional[PartitionKey] = None
