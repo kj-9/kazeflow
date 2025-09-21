@@ -1,8 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from kazeflow.assets import asset
-from kazeflow.context import AssetContext
+from kazeflow.assets import asset, AssetContext
 from kazeflow.flow import Flow
 from kazeflow.partition import DatePartitionKey
 

@@ -1,8 +1,9 @@
 import inspect
 from typing import Any, Callable, Optional, Protocol, TypedDict, Union
 
-from .context import AssetContext
 from .partition import PartitionKey
+from dataclasses import dataclass
+import logging
 
 
 class NamedCallable(Protocol):
@@ -74,3 +75,24 @@ def clear_assets() -> None:
     This is useful for testing purposes.
     """
     _assets.clear()
+
+
+@dataclass
+class AssetContext:
+    """Holds contextual information for an asset's execution."""
+
+    logger: logging.Logger
+    asset_name: str
+    partition_key: Optional[PartitionKey] = None
+
+
+@dataclass
+class AssetResult:
+    """Holds the result of a single asset's execution."""
+
+    name: str
+    success: bool
+    duration: float
+    start_time: float
+    output: Optional[Any] = None
+    exception: Optional[Exception] = None

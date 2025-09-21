@@ -14,7 +14,7 @@ from rich.progress import (
 from rich.tree import Tree
 
 from .logger import get_logger
-from .result import AssetResult
+from .assets import AssetResult
 
 
 def show_flow_tree(graph: Dict[str, Set[str]]) -> None:

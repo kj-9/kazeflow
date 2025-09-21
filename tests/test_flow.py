@@ -168,7 +168,7 @@ async def test_max_concurrency():
 @pytest.mark.asyncio
 async def test_asset_context_injection():
     """Tests that the AssetContext is correctly injected."""
-    from kazeflow.context import AssetContext
+    from kazeflow.assets import AssetContext
 
     result_log = []
 
