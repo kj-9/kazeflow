@@ -1,11 +1,9 @@
 import asyncio
-import inspect
 import logging
-import time
 from graphlib import TopologicalSorter
 from typing import Any, Optional
 
-from .assets import get_asset, AssetContext, AssetResult
+from .assets import get_asset, AssetResult
 from .tui import FlowTUIRenderer, show_flow_tree
 
 
@@ -22,57 +20,8 @@ class Flow:
         self, asset_name: str, logger: logging.Logger
     ) -> AssetResult:
         """Executes an asset and returns a result object."""
-        start_time = time.monotonic()
-        output = None
-        exception = None
-        success = False
-        try:
-            logger.info(f"Executing asset: {asset_name}")
-            asset = get_asset(asset_name)
-
-            asset_func = asset["func"]
-            deps = asset["deps"]
-
-            # Only pass outputs that are actual parameters of the asset function
-            sig = inspect.signature(asset_func)
-            params = sig.parameters
-            input_kwargs = {
-                dep: self.asset_outputs[dep]
-                for dep in deps
-                if dep in self.asset_outputs and dep in params
-            }
-
-            if "context" in params:
-                context = AssetContext(logger=logger, asset_name=asset_name)
-                input_kwargs["context"] = context
-
-            if asyncio.iscoroutinefunction(asset_func):
-                output = await asset_func(**input_kwargs)
-            else:
-                # Run sync function in a thread pool executor
-                loop = asyncio.get_running_loop()
-                import functools
-
-                p = functools.partial(asset_func, **input_kwargs)
-                output = await loop.run_in_executor(None, p)
-            success = True
-
-        except Exception as e:
-            exception = e
-            logger.exception(f"Error executing asset {asset_name}: {e}")
-
-        duration = time.monotonic() - start_time
-        if success:
-            logger.info(f"Finished executing asset: {asset_name} in {duration:.2f}s")
-
-        return AssetResult(
-            name=asset_name,
-            success=success,
-            duration=duration,
-            start_time=start_time,
-            output=output,
-            exception=exception,
-        )
+        asset = get_asset(asset_name)
+        return await asset.execute(logger, self.asset_outputs)
 
     async def run_async(
         self,

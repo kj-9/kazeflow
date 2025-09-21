@@ -1,21 +1,17 @@
+import asyncio
 import inspect
-from typing import Any, Callable, Optional, Protocol, TypedDict, Union
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Optional, Protocol, Union
 
 from .partition import PartitionKey
-from dataclasses import dataclass
-import logging
 
 
 class NamedCallable(Protocol):
     __name__: str
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
-
-
-class Asset(TypedDict):
-    func: NamedCallable
-    deps: list[str]
-    partition_by: Optional[Any]
 
 
 @dataclass
@@ -25,6 +21,83 @@ class AssetContext:
     logger: logging.Logger
     asset_name: str
     partition_key: Optional[PartitionKey] = None
+
+
+@dataclass
+class AssetResult:
+    """Holds the result of a single asset's execution."""
+
+    name: str
+    success: bool
+    duration: float
+    start_time: float
+    output: Optional[Any] = None
+    exception: Optional[Exception] = None
+
+
+class Asset:
+    """Represents a single asset, including its metadata and execution logic."""
+
+    def __init__(
+        self,
+        func: NamedCallable,
+        deps: list[str],
+        partition_by: Optional[PartitionKey] = None,
+    ):
+        self.func = func
+        self.deps = deps
+        self.partition_by = partition_by
+        self.name = func.__name__
+
+    async def execute(
+        self, logger: logging.Logger, asset_outputs: dict[str, Any]
+    ) -> AssetResult:
+        """Executes the asset and returns a result object."""
+        start_time = time.monotonic()
+        output = None
+        exception = None
+        success = False
+        try:
+            logger.info(f"Executing asset: {self.name}")
+
+            sig = inspect.signature(self.func)
+            params = sig.parameters
+            input_kwargs = {
+                dep: asset_outputs[dep]
+                for dep in self.deps
+                if dep in asset_outputs and dep in params
+            }
+
+            if "context" in params:
+                context = AssetContext(logger=logger, asset_name=self.name)
+                input_kwargs["context"] = context
+
+            if asyncio.iscoroutinefunction(self.func):
+                output = await self.func(**input_kwargs)
+            else:
+                loop = asyncio.get_running_loop()
+                import functools
+
+                p = functools.partial(self.func, **input_kwargs)
+                output = await loop.run_in_executor(None, p)
+            success = True
+
+        except Exception as e:
+            exception = e
+            logger.exception(f"Error executing asset {self.name}: {e}")
+
+        duration = time.monotonic() - start_time
+        if success:
+            logger.info(f"Finished executing asset: {self.name} in {duration:.2f}s")
+
+        return AssetResult(
+            name=self.name,
+            success=success,
+            duration=duration,
+            start_time=start_time,
+            output=output,
+            exception=exception,
+        )
 
 
 class AssetRegistry:
@@ -50,16 +123,15 @@ class AssetRegistry:
                 continue
             resolved_deps.add(param.name)
 
-        self._assets[func.__name__] = Asset(
-            {
-                "func": func,
-                "deps": list(resolved_deps),
-                "partition_by": partition_by,
-            }
+        asset_obj = Asset(
+            func=func,
+            deps=list(resolved_deps),
+            partition_by=partition_by,
         )
+        self._assets[func.__name__] = asset_obj
 
     def get(self, name: str) -> Asset:
-        """Retrieves an asset's metadata."""
+        """Retrieves an asset."""
         if name not in self._assets:
             raise ValueError(f"Asset '{name}' not found.")
         return self._assets[name]
@@ -81,7 +153,7 @@ class AssetRegistry:
             visited.add(asset_name)
 
             asset = self.get(asset_name)
-            deps = set(asset["deps"])
+            deps = set(asset.deps)
             graph[asset_name] = deps
 
             for dep in deps:
@@ -115,8 +187,7 @@ def asset(
 
 
 def get_asset(name: str) -> Asset:
-    """Retrieves an asset's metadata including its function, dependencies,
-    and config schema."""
+    """Retrieves an asset object."""
     return default_registry.get(name)
 
 
@@ -131,15 +202,3 @@ def clear_assets() -> None:
 def build_graph(asset_names: list[str]) -> dict[str, set[str]]:
     """Builds a dependency graph for a list of assets."""
     return default_registry.build_graph(asset_names)
-
-
-@dataclass
-class AssetResult:
-    """Holds the result of a single asset's execution."""
-
-    name: str
-    success: bool
-    duration: float
-    start_time: float
-    output: Optional[Any] = None
-    exception: Optional[Exception] = None
