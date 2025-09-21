@@ -185,3 +185,25 @@ async def test_asset_context_injection():
     await flow.run_async()
 
     assert "Hello from asset_with_context" in result_log
+
+
+def test_merged_dependency_resolution():
+    """Tests that explicit and implicit dependencies are merged."""
+
+    @asset
+    def explicit_dep():
+        return "explicit"
+
+    @asset
+    def implicit_dep():
+        return "implicit"
+
+    @asset(deps=["explicit_dep"])
+    def target_asset(implicit_dep: str):
+        pass
+
+    flow = Flow(asset_names=["target_asset"])
+
+    assert "explicit_dep" in flow.graph["target_asset"]
+    assert "implicit_dep" in flow.graph["target_asset"]
+    assert len(flow.graph["target_asset"]) == 2
