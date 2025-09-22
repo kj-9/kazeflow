@@ -1,63 +1,48 @@
-import asyncio
+import time
 from pathlib import Path
 
 import kazeflow
 
 
-date_key_def = kazeflow.DatePartitionDef()
-
-
-@kazeflow.asset(partition_def=date_key_def)
-async def process_day(context: kazeflow.AssetContext) -> Path:
-    """
-    A partitioned asset that simulates processing data for a single day.
-    The `partition_key` will be a date string like '2025-09-21'.
-    """
-    context.logger.info(f"Processing data for date: {context.partition_key}")
-    output_path = Path(f"processed_data/{context.partition_key}.txt")
-    output_path.parent.mkdir(exist_ok=True)
-    output_path.touch()
-    output_path.write_text(f"Data for {context.partition_key}")
-    await asyncio.sleep(3)
-    return output_path
-
-
-@kazeflow.asset(partition_def=date_key_def)
-async def process_day2(process_day, context: kazeflow.AssetContext) -> Path:
-    """
-    A partitioned asset that simulates processing data for a single day.
-    The `partition_key` will be a date string like '2025-09-21'.
-    """
-    context.logger.info(f"Processing data for date: {context.partition_key}")
-    output_path = Path(f"processed_data/{context.partition_key}.txt")
-    output_path.parent.mkdir(exist_ok=True)
-    output_path.touch()
-    output_path.write_text(f"Data for {context.partition_key}")
-    await asyncio.sleep(3)
-    return output_path
-
-
+# Asset 1: Create a raw data file
 @kazeflow.asset
-async def summarize_results(
-    process_day2: dict[str, Path], context: kazeflow.AssetContext
-) -> None:
-    """
-    This asset gathers the results from all partitions of `process_day`.
-    The `process_day` argument will be a dictionary mapping the partition key (date)
-    to the output of that partition (the file path).
-    """
-    context.logger.info(f"Summarizing results for {len(process_day2)} days.")
-    for date_str, path in process_day2.items():
-        context.logger.info(f"  - {date_str}: {path}")
+def create_raw_data(context: kazeflow.AssetContext) -> Path:
+    """Creates a dummy raw data file."""
+    context.logger.info("Creating raw data file...")
+    raw_data_path = Path("raw_data.txt")
+    raw_data_path.write_text("hello world\nkazeflow is awesome\nhello kazeflow")
+    time.sleep(1)
+    context.logger.info(f"Raw data created at {raw_data_path}")
+    return raw_data_path
+
+
+# Asset 2: Process the raw data file
+@kazeflow.asset
+def process_data(create_raw_data: Path, context: kazeflow.AssetContext) -> Path:
+    """Reads the raw data, processes it, and saves to a new file."""
+    context.logger.info(f"Processing data from {create_raw_data}...")
+    processed_data_path = Path("processed_data.txt")
+    content = create_raw_data.read_text()
+    processed_content = content.upper()
+    processed_data_path.write_text(processed_content)
+    time.sleep(1)
+    context.logger.info(f"Processed data saved at {processed_data_path}")
+    return processed_data_path
+
+
+# Asset 3: Summarize the results
+@kazeflow.asset
+def summarize(process_data: Path, context: kazeflow.AssetContext):
+    """Reads the processed data and prints a summary."""
+    context.logger.info(f"Summarizing data from {process_data}...")
+    content = process_data.read_text()
+    word_count = len(content.split())
+    context.logger.info(f"Summary: The processed file contains {word_count} words.")
+    time.sleep(1)
 
 
 if __name__ == "__main__":
     kazeflow.run(
-        asset_names=["summarize_results"],
-        run_config={
-            "partition_keys": date_key_def.range(
-                start_date="2025-09-21", end_date="2025-09-23"
-            ),
-            "max_concurrency": 4,
-        },
+        asset_names=["summarize"],
+        run_config={"max_concurrency": 2},
     )
