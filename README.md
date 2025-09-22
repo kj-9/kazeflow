@@ -105,18 +105,14 @@ INFO     Finished executing asset: process_day2 in 3.00s
 INFO     Finished executing asset: process_day2 in 3.00s                        
 INFO     Executing asset: summarize_results                                     
 INFO     Summarizing results for 3 days.                                        
-INFO       - 2025-09-22: processed_data/2025-09-22.txt                          
 INFO       - 2025-09-21: processed_data/2025-09-21.txt                          
+INFO       - 2025-09-22: processed_data/2025-09-22.txt                          
 INFO       - 2025-09-23: processed_data/2025-09-23.txt                          
 INFO     Finished executing asset: summarize_results in 0.00s                   
 ╭─────────────────────────────────── Assets ───────────────────────────────────╮
-│ ✓ process_day                    (3.00s)                                     │
-│ ✓ process_day                    (3.00s)                                     │
-│ ✓ process_day                    (3.00s)                                     │
-│ ✓ process_day2                   (3.00s)                                     │
-│ ✓ process_day2                   (3.00s)                                     │
-│ ✓ process_day2                   (3.00s)                                     │
+│ ✓ process_day (3 partitions, avg: 3.00s)                                     │
+│ ✓ process_day2 (3 partitions, avg: 3.00s)                                    │
 │ ✓ summarize_results              (0.00s)                                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-Overall Progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7/3 0:00:03
+Overall Progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7/7 0:00:06
 ```
