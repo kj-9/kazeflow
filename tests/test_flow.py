@@ -270,9 +270,46 @@ async def test_downstream_of_partitioned_asset():
 
     await flow.run_async(run_config={"partition_keys": partitions})
 
-    assert set(flow.asset_outputs["downstream"].keys()) == set(partitions)
-    for partition_key in partitions:
-        assert flow.asset_outputs["downstream"][partition_key] == partition_key
+    expected_output = {p: p for p in partitions}
+    assert flow.asset_outputs["downstream"] == expected_output
+
+
+@pytest.mark.asyncio
+async def test_partitioned_asset_execution_order():
+    """
+    Tests that a downstream asset of a partitioned asset is executed only after all
+    partitions are completed.
+    """
+    from kazeflow.assets import AssetContext
+    import time
+
+    date_def = DatePartitionDef()
+    partition_finish_times = {}
+    downstream_start_time = None
+
+    @asset(partition_def=date_def)
+    async def upstream(context: AssetContext):
+        await asyncio.sleep(0.1)
+        partition_finish_times[context.partition_key] = time.time()
+        return context.partition_key
+
+    @asset(deps=["upstream"])
+    async def downstream(upstream: dict):
+        nonlocal downstream_start_time
+        downstream_start_time = time.time()
+        return upstream
+
+    asset_names = ["downstream"]
+    graph = default_registry.build_graph(asset_names)
+    flow = Flow(graph)
+
+    partitions = date_def.range("2025-09-21", "2025-09-23")
+
+    await flow.run_async(run_config={"partition_keys": partitions}, max_concurrency=4)
+
+    assert downstream_start_time is not None
+    last_partition_finish_time = max(partition_finish_times.values())
+    assert downstream_start_time >= last_partition_finish_time
 
 
 @pytest.mark.asyncio

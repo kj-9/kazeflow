@@ -107,8 +107,12 @@ class AssetExecutionManager:
                     self.asset_outputs[asset_name] = asset_result.output
 
                 # If the asset (or all its partitions) are done, mark it in the sorter
+                is_running = any(
+                    an == asset_name for an, _, _ in self.running_tasks.values()
+                )
                 if (
                     asset_name not in self.partitions_to_process
+                    and not is_running
                     and asset_name not in self.done_assets
                 ):
                     self.ts.done(asset_name)
