@@ -8,7 +8,7 @@ This file outlines the development rules for this project when using Gemini.
 *   **Type Checking**: `ty` is used as the type checker. All code must pass `ty`'s strict type checking before committing.
 *   **Testing**: `pytest` is used for unit testing. All new code should be accompanied by unit tests.
 
-## 2. Workflow
+*   **Simplicity**: Keep the implementation as simple as possible. Avoid using too many branches, and handle things with a single logic path as much as possible. Use UltraThink and make a maximum effort.
 
 After any code changes, Gemini will automatically perform the following steps:
 

@@ -1,19 +1,21 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import datetime
-from typing import Sequence
+from typing import Hashable, Sequence, TypeAlias
+
+PartitionKey: TypeAlias = Hashable
+PartitionKeys: TypeAlias = Sequence[PartitionKey]
 
 
 @dataclass(frozen=True)
-class PartitionKey:
-    def range(self, start, end) -> Sequence:
+class PartitionDef(ABC):
+    @abstractmethod
+    def range(self, start, end) -> PartitionKeys:
         raise NotImplementedError
 
 
-class DatePartitionKey(PartitionKey):
+class DatePartitionDef(PartitionDef):
     """Represents a definition for a date-based partition."""
-
-    def __init__(self, key: str):
-        self.key = key
 
     def range(self, start_date: str, end_date: str) -> list[datetime.date]:
         """Creates a configuration object representing a date range."""

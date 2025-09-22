@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol, Union
 
-from .partition import PartitionKey
+from .partition import PartitionDef, PartitionKey
 
 
 class NamedCallable(Protocol):
@@ -18,9 +18,9 @@ class NamedCallable(Protocol):
 class AssetContext:
     """Holds contextual information for an asset's execution."""
 
-    logger: logging.Logger
     asset_name: str
-    partition_key: Optional[PartitionKey] = None
+    logger: logging.Logger
+    partition_key: Optional[PartitionKey]
 
 
 @dataclass
@@ -42,11 +42,11 @@ class Asset:
         self,
         func: NamedCallable,
         deps: list[str],
-        partition_by: Optional[PartitionKey] = None,
+        partition_def: Optional[PartitionDef] = None,
     ):
         self.func = func
         self.deps = deps
-        self.partition_by = partition_by
+        self.partition_def = partition_def
         self.name = func.__name__
 
     async def execute(
@@ -111,14 +111,14 @@ class AssetRegistry:
         self,
         func: NamedCallable,
         deps: Optional[list[str]] = None,
-        partition_by: Optional[PartitionKey] = None,
+        partition_def: Optional[PartitionDef] = None,
     ):
         """Registers an asset."""
         resolved_deps = set(deps or [])
 
         sig = inspect.signature(func)
         for param in sig.parameters.values():
-            if param.name in ("context", "config", "partition_key"):
+            if param.name in ("context"):
                 continue
             if param.annotation is AssetContext:
                 continue
@@ -127,7 +127,7 @@ class AssetRegistry:
         asset_obj = Asset(
             func=func,
             deps=list(resolved_deps),
-            partition_by=partition_by,
+            partition_def=partition_def,
         )
         self._assets[func.__name__] = asset_obj
 
@@ -171,14 +171,14 @@ def asset(
     _func: Optional[NamedCallable] = None,
     *,
     deps: Optional[list[str]] = None,
-    partition_by: Optional[PartitionKey] = None,
+    partition_def: Optional[PartitionDef] = None,
 ) -> Union[Callable[[NamedCallable], NamedCallable], NamedCallable]:
     """
     A decorator to define an asset, its dependencies, and its configuration schema.
     """
 
     def decorator(func: NamedCallable) -> NamedCallable:
-        default_registry.register(func, deps=deps, partition_by=partition_by)
+        default_registry.register(func, deps=deps, partition_def=partition_def)
         return func
 
     if _func is None:
