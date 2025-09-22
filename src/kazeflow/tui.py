@@ -91,13 +91,39 @@ class FlowTUIRenderer:
         # Sort results by start time before final render
         self.results.sort(key=lambda r: r.start_time)
 
-        # Now, populate the final progress bars
-        for result in self.results:
-            description = f"{result.name:<30} ({result.duration:.2f}s)"
-            if result.success:
-                self.completed_progress.add_task(description)
+        # Group results by asset name
+        grouped_results: Dict[str, list[AssetResult]] = {}
+        for r in self.results:
+            if r.name not in grouped_results:
+                grouped_results[r.name] = []
+            grouped_results[r.name].append(r)
+
+        for name, results in grouped_results.items():
+            # check if any result has a partition key
+            is_partitioned = any(r.partition_key is not None for r in results)
+
+            if is_partitioned:
+                total_duration = sum(r.duration for r in results)
+                avg_duration = total_duration / len(results)
+                success_count = sum(1 for r in results if r.success)
+                status_icon = "✓" if success_count == len(results) else "✗"
+                progress_bar = (
+                    self.completed_progress
+                    if status_icon == "✓"
+                    else self.failed_progress
+                )
+                description = (
+                    f"{name} ({len(results)} partitions, avg: {avg_duration:.2f}s)"
+                )
+                progress_bar.add_task(description)
             else:
-                self.failed_progress.add_task(description)
+                # Non-partitioned asset (should only have one result)
+                result = results[0]
+                description = f"{result.name:<30} ({result.duration:.2f}s)"
+                if result.success:
+                    self.completed_progress.add_task(description)
+                else:
+                    self.failed_progress.add_task(description)
 
         return self.live.__exit__(exc_type, exc_val, exc_tb)
 

@@ -135,8 +135,16 @@ class Flow:
         if max_concurrency is not None and max_concurrency <= 0:
             raise ValueError("max_concurrency must be a positive integer or None.")
 
+        total_tasks = 0
+        for asset_name in self.static_order:
+            asset = default_registry.get(asset_name)
+            if asset.partition_def and run_config and "partition_keys" in run_config:
+                total_tasks += len(run_config["partition_keys"])
+            else:
+                total_tasks += 1
+
         show_flow_tree(self.graph)
-        tui = FlowTUIRenderer(total_assets=len(self.static_order))
+        tui = FlowTUIRenderer(total_assets=total_tasks)
 
         with tui:
             manager = AssetExecutionManager(

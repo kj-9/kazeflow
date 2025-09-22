@@ -31,6 +31,7 @@ class AssetResult:
     success: bool
     duration: float
     start_time: float
+    partition_key: Optional[PartitionKey] = None
     output: Optional[Any] = None
     exception: Optional[Exception] = None
 
@@ -98,6 +99,7 @@ class Asset:
             start_time=start_time,
             output=output,
             exception=exception,
+            partition_key=context.partition_key,
         )
 
 
