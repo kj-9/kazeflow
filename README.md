@@ -5,103 +5,118 @@
 
 ## Example
 
-When you run this script, `kazeflow` will execute the assets in the correct order, handle the failure of `failing_asset` gracefully, and provide a rich terminal UI to visualize the progress.
+Here is a simple example of how to use `kazeflow` to define and execute a data flow with dependencies, partitions, and a rich terminal UI.
 
-
-Here is a simple example of how to use `kazeflow` to define and execute a data flow with dependencies, inputs/outputs, and logging.
+When you run this script, `kazeflow` will execute the assets in the correct order, process the partitions in parallel, and provide a rich terminal UI to visualize the progress.
 
 
 example.py:
 ```python
 import asyncio
+from pathlib import Path
 
-from kazeflow.assets import asset, AssetContext, default_registry
-from kazeflow.flow import Flow
-
-
-# A simple asset with no dependencies
-@asset()
-async def users() -> list[str]:
-    """This asset returns a list of user names."""
-    return ["Alice", "Bob", "Charlie"]
+import kazeflow
 
 
-# This asset depends on the `users` asset.
-# The output of `users` is automatically passed as an argument.
-@asset(deps=["users"])
-async def greetings(users: list[str], context: AssetContext) -> list[str]:
-    """This asset receives the list of users and a context object.
+date_key_def = kazeflow.DatePartitionDef()
 
-    It uses the context to get a logger and log a message.
+
+@kazeflow.asset(partition_def=date_key_def)
+async def process_day(context: kazeflow.AssetContext) -> Path:
     """
-    context.logger.info(f"Generating greetings for {len(users)} users.")
-    return [f"Hello, {user}!" for user in users]
+    A partitioned asset that simulates processing data for a single day.
+    The `partition_key` will be a date string like '2025-09-21'.
+    """
+    context.logger.info(f"Processing data for date: {context.partition_key}")
+    output_path = Path(f"processed_data/{context.partition_key}.txt")
+    output_path.parent.mkdir(exist_ok=True)
+    output_path.touch()
+    output_path.write_text(f"Data for {context.partition_key}")
+    await asyncio.sleep(3)
+    return output_path
 
 
-# This asset fails intentionally to demonstrate error handling.
-@asset(deps=["users"])
-async def failing_asset(users: list[str]):
-    """This asset always fails."""
-    raise ValueError("This asset is designed to fail.")
+@kazeflow.asset(partition_def=date_key_def)
+async def process_day2(process_day, context: kazeflow.AssetContext) -> Path:
+    """
+    A partitioned asset that simulates processing data for a single day.
+    The `partition_key` will be a date string like '2025-09-21'.
+    """
+    context.logger.info(f"Processing data for date: {context.partition_key}")
+    output_path = Path(f"processed_data/{context.partition_key}.txt")
+    output_path.parent.mkdir(exist_ok=True)
+    output_path.touch()
+    output_path.write_text(f"Data for {context.partition_key}")
+    await asyncio.sleep(3)
+    return output_path
+
+
+@kazeflow.asset
+async def summarize_results(
+    process_day2: dict[str, Path], context: kazeflow.AssetContext
+) -> None:
+    """
+    This asset gathers the results from all partitions of `process_day`.
+    The `process_day` argument will be a dictionary mapping the partition key (date)
+    to the output of that partition (the file path).
+    """
+    context.logger.info(f"Summarizing results for {len(process_day2)} days.")
+    for date_str, path in process_day2.items():
+        context.logger.info(f"  - {date_str}: {path}")
 
 
 if __name__ == "__main__":
-    # Define a flow that includes the final assets we want to generate.
-    # kazeflow automatically includes all upstream dependencies.
-    asset_names = ["greetings", "failing_asset"]
-    ts = default_registry.build_graph(asset_names)
-    flow = Flow(ts)
-
-    # Run the flow asynchronously.
-    # You can limit the number of concurrent assets with `max_concurrency`.
-    asyncio.run(flow.run_async(max_concurrency=2))
+    kazeflow.run(
+        asset_names=["summarize_results"],
+        run_config={
+            "partition_keys": date_key_def.range(
+                start_date="2025-09-21", end_date="2025-09-23"
+            ),
+            "max_concurrency": 4,
+        },
+    )
 
 ```
 ```bash
-❯ uv run example.py
+❯ uv run python example.py
 Task Flow (Execution Order)
-└── users
-    ├── failing_asset
-    └── greetings
+└── process_day
+    └── process_day2
+        └── summarize_results
 
 Execution Logs
-INFO     Executing asset: users                                         
-INFO     Finished executing asset: users in 0.00s                       
-INFO     Executing asset: greetings                                     
-INFO     Generating greetings for 3 users.                              
-INFO     Finished executing asset: greetings in 0.00s                   
-INFO     Executing asset: failing_asset                                 
-ERROR    Error executing asset failing_asset: This asset is designed to 
-         fail.                                                          
-         ╭───────────── Traceback (most recent call last) ─────────────╮
-         │ /Users/kh03/work/repos/myflow/src/kazeflow/flow.py:82 in    │
-         │ _execute_asset                                              │
-         │                                                             │
-         │    79 │   │   │   │   input_kwargs["context"] = context     │
-         │    80 │   │   │                                             │
-         │    81 │   │   │   if asyncio.iscoroutinefunction(asset_func │
-         │ ❱  82 │   │   │   │   output = await asset_func(**input_kwa │
-         │    83 │   │   │   else:                                     │
-         │    84 │   │   │   │   # Run sync function in a thread pool  │
-         │    85 │   │   │   │   loop = asyncio.get_running_loop()     │
-         │                                                             │
-         │ /Users/kh03/work/repos/myflow/example.py:31 in              │
-         │ failing_asset                                               │
-         │                                                             │
-         │   28 @asset(deps=["users"])                                 │
-         │   29 async def failing_asset(users: list[str]):             │
-         │   30 │   """This asset always fails."""                     │
-         │ ❱ 31 │   raise ValueError("This asset is designed to fail." │
-         │   32                                                        │
-         │   33                                                        │
-         │   34 if __name__ == "__main__":                             │
-         ╰─────────────────────────────────────────────────────────────╯
-         ValueError: This asset is designed to fail.                    
-╭─────────────────────────────── Assets ───────────────────────────────╮
-│ ✓ users                          (0.00s)                             │
-│ ✓ greetings                      (0.00s)                             │
-│ ✗ failing_asset                  (0.04s)                             │
-╰──────────────────────────────────────────────────────────────────────╯
-Overall Progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3/3 0:00:00
-
+INFO     Executing asset: process_day                                           
+INFO     Processing data for date: 2025-09-21                                   
+INFO     Executing asset: process_day                                           
+INFO     Processing data for date: 2025-09-22                                   
+INFO     Executing asset: process_day                                           
+INFO     Processing data for date: 2025-09-23                                   
+INFO     Finished executing asset: process_day in 3.00s                         
+INFO     Finished executing asset: process_day in 3.00s                         
+INFO     Finished executing asset: process_day in 3.00s                         
+INFO     Executing asset: process_day2                                          
+INFO     Processing data for date: 2025-09-21                                   
+INFO     Executing asset: process_day2                                          
+INFO     Processing data for date: 2025-09-22                                   
+INFO     Executing asset: process_day2                                          
+INFO     Processing data for date: 2025-09-23                                   
+INFO     Finished executing asset: process_day2 in 3.00s                        
+INFO     Finished executing asset: process_day2 in 3.00s                        
+INFO     Finished executing asset: process_day2 in 3.00s                        
+INFO     Executing asset: summarize_results                                     
+INFO     Summarizing results for 3 days.                                        
+INFO       - 2025-09-22: processed_data/2025-09-22.txt                          
+INFO       - 2025-09-21: processed_data/2025-09-21.txt                          
+INFO       - 2025-09-23: processed_data/2025-09-23.txt                          
+INFO     Finished executing asset: summarize_results in 0.00s                   
+╭─────────────────────────────────── Assets ───────────────────────────────────╮
+│ ✓ process_day                    (3.00s)                                     │
+│ ✓ process_day                    (3.00s)                                     │
+│ ✓ process_day                    (3.00s)                                     │
+│ ✓ process_day2                   (3.00s)                                     │
+│ ✓ process_day2                   (3.00s)                                     │
+│ ✓ process_day2                   (3.00s)                                     │
+│ ✓ summarize_results              (0.00s)                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Overall Progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7/3 0:00:03
 ```

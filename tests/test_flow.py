@@ -171,7 +171,7 @@ async def test_max_concurrency():
     asset_names = ["a", "b", "c", "d"]
     graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
-    await flow.run_async(max_concurrency=2)
+    await flow.run_async(run_config={"max_concurrency": 2})
 
     assert max_observed_concurrency == 2
 
@@ -305,7 +305,9 @@ async def test_partitioned_asset_execution_order():
 
     partitions = date_def.range("2025-09-21", "2025-09-23")
 
-    await flow.run_async(run_config={"partition_keys": partitions}, max_concurrency=4)
+    await flow.run_async(
+        run_config={"partition_keys": partitions, "max_concurrency": 4}
+    )
 
     assert downstream_start_time is not None
     last_partition_finish_time = max(partition_finish_times.values())

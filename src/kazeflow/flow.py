@@ -9,8 +9,9 @@ from .tui import FlowTUIRenderer, show_flow_tree
 from .partition import PartitionKeys
 
 
-class RunConfig(TypedDict):
+class RunConfig(TypedDict, total=False):
     partition_keys: PartitionKeys
+    max_concurrency: int
 
 
 class AssetExecutionManager:
@@ -18,13 +19,12 @@ class AssetExecutionManager:
         self,
         graph: dict[str, set[str]],
         run_config: Optional[RunConfig],
-        max_concurrency: Optional[int],
         tui: FlowTUIRenderer,
         asset_outputs: dict[str, Any],
     ):
         self.ts = TopologicalSorter(graph)
         self.run_config = run_config
-        self.max_concurrency = max_concurrency or float("inf")
+        self.max_concurrency = (run_config or {}).get("max_concurrency") or float("inf")
         self.tui = tui
         self.asset_outputs = asset_outputs
 
@@ -129,12 +129,9 @@ class Flow:
         self.asset_outputs: dict[str, Any] = defaultdict(dict)
         self.static_order = list(TopologicalSorter(self.graph).static_order())
 
-    async def run_async(
-        self,
-        run_config: Optional[RunConfig] = None,
-        max_concurrency: Optional[int] = None,
-    ) -> None:
+    async def run_async(self, run_config: Optional[RunConfig] = None) -> None:
         """Executes the assets in the flow asynchronously with a concurrency limit."""
+        max_concurrency = (run_config or {}).get("max_concurrency")
         if max_concurrency is not None and max_concurrency <= 0:
             raise ValueError("max_concurrency must be a positive integer or None.")
 
@@ -143,6 +140,16 @@ class Flow:
 
         with tui:
             manager = AssetExecutionManager(
-                self.graph, run_config, max_concurrency, tui, self.asset_outputs
+                self.graph, run_config, tui, self.asset_outputs
             )
             await manager.run()
+
+
+def run(
+    asset_names: list[str],
+    run_config: Optional[RunConfig] = None,
+) -> None:
+    """Runs a flow with the given asset names and run configuration."""
+    graph = default_registry.build_graph(asset_names)
+    flow = Flow(graph)
+    asyncio.run(flow.run_async(run_config=run_config))
