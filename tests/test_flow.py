@@ -4,6 +4,7 @@ import pytest
 
 from kazeflow.assets import asset, default_registry
 from kazeflow.flow import Flow
+from kazeflow.partition import DatePartitionDef
 
 
 @pytest.fixture(autouse=True)
@@ -221,3 +222,54 @@ def test_merged_dependency_resolution():
     assert "explicit_dep" in flow.graph["target_asset"]
     assert "implicit_dep" in flow.graph["target_asset"]
     assert len(flow.graph["target_asset"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_partitioned_asset():
+    """Tests that a partitioned asset is executed for each partition key."""
+    from kazeflow.assets import AssetContext
+
+    date_def = DatePartitionDef()
+    state = {"execution_partitions": []}
+
+    @asset(partition_def=date_def)
+    async def partitioned(context: AssetContext, state: dict):
+        state["execution_partitions"].append(context.partition_key)
+
+    asset_names = ["partitioned"]
+    graph = default_registry.build_graph(asset_names)
+    flow = Flow(graph)
+    
+    partitions = date_def.range("2025-09-21", "2025-09-23")
+    
+    await flow.run_async(run_config={"partition_keys": partitions}, state=state)
+
+    assert set(state["execution_partitions"]) == set(partitions)
+
+
+@pytest.mark.asyncio
+async def test_downstream_of_partitioned_asset():
+    """Tests that a downstream asset receives the output of all partitions."""
+    from kazeflow.assets import AssetContext
+
+    date_def = DatePartitionDef()
+
+    @asset(partition_def=date_def)
+    async def upstream(context: AssetContext):
+        return context.partition_key
+
+    @asset(deps=["upstream"])
+    async def downstream(upstream: dict):
+        return upstream
+
+    asset_names = ["downstream"]
+    graph = default_registry.build_graph(asset_names)
+    flow = Flow(graph)
+    
+    partitions = date_def.range("2025-09-21", "2025-09-23")
+    
+    await flow.run_async(run_config={"partition_keys": partitions})
+
+    assert set(flow.asset_outputs["downstream"].keys()) == set(partitions)
+    for partition_key in partitions:
+        assert flow.asset_outputs["downstream"][partition_key] == partition_key
