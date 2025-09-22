@@ -57,9 +57,9 @@ class AssetExecutionManager:
             if asset_name not in self.partitions_to_process:
                 asset = default_registry.get(asset_name)
                 if asset.partition_def:
-                    self.partitions_to_process[asset_name] = (
-                        self.run_config or {}
-                    ).get("partition_keys", [])
+                    self.partitions_to_process[asset_name] = list(
+                        (self.run_config or {}).get("partition_keys", [])
+                    )
                 else:
                     self.partitions_to_process[asset_name] = [None]
 

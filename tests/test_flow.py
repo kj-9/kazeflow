@@ -230,21 +230,21 @@ async def test_partitioned_asset():
     from kazeflow.assets import AssetContext
 
     date_def = DatePartitionDef()
-    state = {"execution_partitions": []}
 
     @asset(partition_def=date_def)
-    async def partitioned(context: AssetContext, state: dict):
-        state["execution_partitions"].append(context.partition_key)
+    async def partitioned(context: AssetContext):
+        return context.partition_key
 
     asset_names = ["partitioned"]
     graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
-    
-    partitions = date_def.range("2025-09-21", "2025-09-23")
-    
-    await flow.run_async(run_config={"partition_keys": partitions}, state=state)
 
-    assert set(state["execution_partitions"]) == set(partitions)
+    partitions = date_def.range("2025-09-21", "2025-09-23")
+
+    await flow.run_async(run_config={"partition_keys": partitions})
+
+    assert set(flow.asset_outputs["partitioned"].keys()) == set(partitions)
+    assert all(key == value for key, value in flow.asset_outputs["partitioned"].items())
 
 
 @pytest.mark.asyncio
@@ -265,11 +265,58 @@ async def test_downstream_of_partitioned_asset():
     asset_names = ["downstream"]
     graph = default_registry.build_graph(asset_names)
     flow = Flow(graph)
-    
+
     partitions = date_def.range("2025-09-21", "2025-09-23")
-    
+
     await flow.run_async(run_config={"partition_keys": partitions})
 
     assert set(flow.asset_outputs["downstream"].keys()) == set(partitions)
     for partition_key in partitions:
         assert flow.asset_outputs["downstream"][partition_key] == partition_key
+
+
+@pytest.mark.asyncio
+async def test_downstream_partitioned_asset_dependency():
+    """
+    Tests that a downstream partitioned asset also gets executed for all partitions
+    and correctly receives the output from its upstream partitioned dependency.
+    """
+    from kazeflow.assets import AssetContext
+
+    date_def = DatePartitionDef()
+
+    @asset(partition_def=date_def)
+    async def upstream_partitioned(context: AssetContext):
+        return f"output_{context.partition_key}"
+
+    @asset(partition_def=date_def)
+    async def downstream_partitioned(
+        upstream_partitioned: dict[str, str], context: AssetContext
+    ):
+        # Assert that the input from the upstream asset corresponds to the same partition
+        import datetime
+
+        assert upstream_partitioned == {
+            datetime.date(2025, 9, 21): "output_2025-09-21",
+            datetime.date(2025, 9, 22): "output_2025-09-22",
+            datetime.date(2025, 9, 23): "output_2025-09-23",
+        }
+        return f"downstream_{context.partition_key}"
+
+    asset_names = ["downstream_partitioned"]
+    graph = default_registry.build_graph(asset_names)
+    flow = Flow(graph)
+
+    partitions = date_def.range("2025-09-21", "2025-09-23")
+
+    await flow.run_async(run_config={"partition_keys": partitions})
+
+    # Check that the downstream asset was executed for all partitions
+    assert set(flow.asset_outputs["downstream_partitioned"].keys()) == set(partitions)
+    for partition_key, output in flow.asset_outputs["downstream_partitioned"].items():
+        assert output == f"downstream_{partition_key}"
+
+    # Also check the upstream asset's output
+    assert set(flow.asset_outputs["upstream_partitioned"].keys()) == set(partitions)
+    for partition_key, output in flow.asset_outputs["upstream_partitioned"].items():
+        assert output == f"output_{partition_key}"
