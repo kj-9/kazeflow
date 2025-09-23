@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "netext==0.4.0.dev0",
+    "netext",
     "rich>=14.1.0",
 ]
 
