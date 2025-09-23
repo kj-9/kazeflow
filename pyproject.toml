@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    "netext==0.4.0.dev0",
     "rich>=14.1.0",
 ]
 
@@ -18,6 +19,9 @@ build-backend = "uv_build"
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.uv.sources]
+netext = { git = "https://github.com/kj-9/netext.git", branch = "drop-networkx" }
 
 [dependency-groups]
 dev = [
