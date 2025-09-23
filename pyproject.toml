@@ -1,6 +1,6 @@
 [project]
 name = "kazeflow"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "A lightweight, asset-based task flow engine"
 readme = "README.md"
 authors = [
