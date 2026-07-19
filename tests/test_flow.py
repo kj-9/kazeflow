@@ -332,13 +332,9 @@ async def test_downstream_partitioned_asset_dependency():
     async def downstream_partitioned(
         upstream_partitioned: dict[str, str], context: AssetContext
     ):
-        # Assert that the input from the upstream asset corresponds to the same partition
-        import datetime
-
+        # Partitioned consumers receive only their matching upstream key.
         assert upstream_partitioned == {
-            datetime.date(2025, 9, 21): "output_2025-09-21",
-            datetime.date(2025, 9, 22): "output_2025-09-22",
-            datetime.date(2025, 9, 23): "output_2025-09-23",
+            context.partition_key: f"output_{context.partition_key}"
         }
         return f"downstream_{context.partition_key}"
 

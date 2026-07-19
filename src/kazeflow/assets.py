@@ -1,7 +1,6 @@
 import asyncio
 import inspect
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol, Union
 
@@ -50,56 +49,26 @@ class Asset:
         self.partition_def = partition_def
         self.name = func.__name__
 
-    async def execute(
-        self, context: AssetContext, asset_outputs: dict[str, Any]
-    ) -> AssetResult:
-        """Executes the asset and returns a result object."""
-        start_time = time.monotonic()
-        output = None
-        exception = None
-        success = False
-        try:
-            context.logger.info(f"Executing asset: {self.name}")
+    async def invoke(self, context: AssetContext, inputs: dict[str, Any]) -> Any:
+        """Invoke the plain asset callable with already-resolved inputs.
 
-            sig = inspect.signature(self.func)
-            params = sig.parameters
-            input_kwargs = {
-                dep: asset_outputs[dep]
-                for dep in self.deps
-                if dep in asset_outputs and dep in params
-            }
+        Exception handling, lifecycle timing, and presentation belong to the flow
+        executor.  Keeping this method neutral lets direct calls to the decorated
+        function retain their normal Python behaviour.
+        """
+        params = inspect.signature(self.func).parameters
+        input_kwargs = {name: value for name, value in inputs.items() if name in params}
+        if "context" in params:
+            input_kwargs["context"] = context
 
-            if "context" in params:
-                input_kwargs["context"] = context
+        if asyncio.iscoroutinefunction(self.func):
+            return await self.func(**input_kwargs)
 
-            if asyncio.iscoroutinefunction(self.func):
-                output = await self.func(**input_kwargs)
-            else:
-                loop = asyncio.get_running_loop()
-                import functools
+        loop = asyncio.get_running_loop()
+        import functools
 
-                p = functools.partial(self.func, **input_kwargs)
-                output = await loop.run_in_executor(None, p)
-            success = True
-
-        except Exception as e:
-            exception = e
-            context.logger.exception(f"Error executing asset {self.name}: {e}")
-
-        duration = time.monotonic() - start_time
-        if success:
-            context.logger.info(
-                f"Finished executing asset: {self.name} in {duration:.2f}s"
-            )
-
-        return AssetResult(
-            name=self.name,
-            success=success,
-            duration=duration,
-            start_time=start_time,
-            output=output,
-            exception=exception,
-            partition_key=context.partition_key,
+        return await loop.run_in_executor(
+            None, functools.partial(self.func, **input_kwargs)
         )
 
 
