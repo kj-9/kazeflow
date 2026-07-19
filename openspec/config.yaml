@@ -2,7 +2,8 @@ schema: spec-driven
 
 context: |
   kazeflow is a Python 3.10+ lightweight, asset-based task-flow library.
-  Before creating, updating, or applying any change, read docs/GOAL.md and docs/ROADMAP.md.
+  Before creating, updating, or applying any change, read AGENTS.md, docs/GOAL.md, and docs/ROADMAP.md.
+  AGENTS.md defines repository workflow, OpenSpec usage, validation commands, and parallel file ownership rules.
   docs/GOAL.md defines the product goal, design principles, and non-goals.
   docs/ROADMAP.md defines priorities, milestone scope, sequencing, and parallel ownership boundaries.
 
