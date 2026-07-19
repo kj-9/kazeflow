@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  kazeflow is a Python 3.10+ lightweight, asset-based task-flow library.
+  Before creating, updating, or applying any change, read docs/GOAL.md and docs/ROADMAP.md.
+  docs/GOAL.md defines the product goal, design principles, and non-goals.
+  docs/ROADMAP.md defines priorities, milestone scope, sequencing, and parallel ownership boundaries.
+
+  The core runtime must use only the Python standard library and have zero required third-party runtime dependencies.
+  Optional presentation and persistence features must remain extras or adapters and must not change core semantics.
+  The project is script-first and infrastructure-free. It must not grow into a scheduler, daemon, control plane,
+  distributed execution platform, or sandbox for untrusted Python code.
+
+  OpenSpec changes are the unit of planned implementation work. Parallel agents may work only on tasks with
+  non-overlapping file ownership. flow.py, assets.py, __init__.py, pyproject.toml, and uv.lock are conflict hotspots
+  and must have a single owner in each parallel wave.
+
+  Tooling: uv, pytest, pytest-asyncio, ruff, and ty. Supported Python versions: 3.10 through 3.13.
+
+rules:
+  proposal:
+    - Identify the docs/ROADMAP.md milestone this change advances, or explain why the change is unplanned.
+    - Include explicit scope and non-goals.
+    - State the impact on the zero-runtime-dependency core and on public API compatibility.
+  specs:
+    - Specify externally observable behavior and testable scenarios rather than implementation details.
+    - Cover relevant failure, concurrency, partition, and compatibility edge cases.
+  design:
+    - Preserve the boundaries and non-goals in docs/GOAL.md.
+    - Record public API, failure semantics, migration strategy, and dependency direction where applicable.
+    - Define module and file ownership boundaries suitable for parallel implementation.
+  tasks:
+    - Split work into independently verifiable tasks with explicit file or module ownership where practical.
+    - Mark shared-file integration and OpenSpec sync/archive steps as serial work.
+    - Include tests, make test, make ci-check, and package checks relevant to the change.
