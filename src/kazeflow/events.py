@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+import logging
 from typing import Protocol, Sequence
 
 from .results import (
@@ -215,9 +216,33 @@ class ExecutionEvent:
 
 
 class ExecutionEventConsumer(Protocol):
-    """A passive observer interface; dispatch policy belongs to later integration."""
+    """Synchronous observer interface selected explicitly by the caller."""
 
     def on_event(self, event: ExecutionEvent) -> None: ...
+
+
+class NoOpExecutionEventConsumer:
+    """A standard-library consumer used when a caller selects no observation."""
+
+    def on_event(self, event: ExecutionEvent) -> None:
+        """Deliberately discard the event without presentation or persistence."""
+
+
+class LoggingExecutionEventConsumer:
+    """Emit compact lifecycle records through a caller-owned standard-library logger."""
+
+    def __init__(self, logger: logging.Logger) -> None:
+        self._logger = logger
+
+    def on_event(self, event: ExecutionEvent) -> None:
+        """Log event metadata without configuring the logging subsystem."""
+        self._logger.info(
+            "kazeflow event run_id=%s sequence=%s kind=%s status=%s",
+            event.run_id,
+            event.sequence,
+            event.kind.value,
+            event.status.value if event.status is not None else None,
+        )
 
 
 @dataclass(slots=True)

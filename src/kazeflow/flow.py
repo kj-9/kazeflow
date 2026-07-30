@@ -16,6 +16,7 @@ from .events import (
     EventKind,
     ExecutionEvent,
     ExecutionEventConsumer,
+    NoOpExecutionEventConsumer,
     validate_event_sequence,
 )
 from .plan import FlowPlan, PlanConfig, TaskPlan, build_flow_plan
@@ -192,7 +193,9 @@ class _Executor:
         self.plan = plan
         self.registry = registry
         self.asset_outputs = asset_outputs
-        self.consumer = consumer
+        self.consumer: ExecutionEventConsumer = (
+            consumer if consumer is not None else NoOpExecutionEventConsumer()
+        )
         self.run_id = str(uuid4())
         self.events: list[ExecutionEvent] = []
         self._sequence = 0
@@ -607,8 +610,7 @@ class _Executor:
         self._sequence += 1
         event = ExecutionEvent(self.run_id, self._sequence, _utc_now(), kind, **kwargs)
         self.events.append(event)
-        if self.consumer is not None:
-            self.consumer.on_event(event)
+        self.consumer.on_event(event)
 
 
 def _utc_now() -> datetime:
