@@ -1,6 +1,9 @@
 # kazeflow Roadmap
 
-> Status: Draft
+> Status: M0–M6 Complete
+
+この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
+固定または完了にするものではない。
 
 ## Purpose
 
@@ -13,24 +16,25 @@ GOAL.mdは「なぜ、何を守るか」、このroadmapは「どの順序で進
 
 ## Current state
 
-現在のkazeflowは、asset定義、依存関係の解決、同期・非同期taskの実行、並列数の制御、
-partition、Richによる実行表示を備えている。既存の11 testsは成功している。
+M0〜M6を完了し、2026-07-31時点でfull test suiteが成功している。coreはPython標準ライブラリだけで動作し、
+Rich TUIはoptional extra、SQLite run storageは明示的に利用するadapterとして分離されている。
+`FlowPlan`、`RunResult`、execution eventsにより、実行前のreview、実行中の表示、実行後の
+構造化結果と任意の永続化を分離している。READMEとexampleにはreview workflowを示し、
+core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease checkに含めている。
 
-一方、GOAL.mdとの間には次の差分がある。
+### Completion status
 
-- `rich`と未使用の`netext`が必須runtime dependencyになっている。
-- executorがRich TUIとloggerへ直接依存している。
-- 表示から独立した構造化`FlowPlan`がない。
-- 内部のasset resultはTUIだけが収集し、`run()`と`run_async()`は結果を返さない。
-- dependencyをsetで扱う箇所があり、planの順序が決定的でない。
-- execution、failure、partitionの一部のsemanticsが未定義である。
-- 永続化可能なrun recordと、そのための安定したschemaがない。
-
-また、現在のschedulerには、同時にreadyになったtaskまたはpartitionが`max_concurrency`を
-超える場合、枠に入らなかったものが未実行のまま終了し得る問題がある。
-既存testは最大同時実行数を確認するが、全taskのexactly-once実行を確認していない。
+- M0: execution contractsをOpenSpecで固定し、archive済み。
+- M1: `FlowPlan`、`RunResult`、execution eventのcore modelを実装済み。
+- M2: executorをstructured plan/resultへ統合し、concurrency、partition、failure、再実行のsemanticsを検証済み。
+- M3: Rich presentationをoptional TUIへ分離し、core observer境界を実装済み。
+- M4: zero-dependency coreとcore/TUI package checksを実装済み。
+- M5: reviewable flow workflowのdocumentationとexampleを整備済み。
+- M6: 明示的なSQLite run-store adapter、schema version、migration、round-trip testsを実装し、archive済み。
 
 ## Roadmap
+
+以下は、完了時に用いたscopeとacceptance criteriaを履歴として保持している。
 
 ### M0: Establish execution contracts
 
@@ -91,7 +95,7 @@ OpenSpec change: `add-run-result`
 
 ### M2: Stabilize and integrate the core executor
 
-OpenSpec change: `stabilize-core-executor`
+OpenSpec change: `return-run-result`
 
 executorが`FlowPlan`を消費して実行し、`RunResult`とexecution eventを生成する形へ統合する。
 共有実行経路の競合を避けるため、このmilestoneのexecutor統合は単独ownerが担当する。
