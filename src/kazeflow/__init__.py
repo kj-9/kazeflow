@@ -1,5 +1,20 @@
 from .assets import AssetContext, asset
-from .flow import RunConfig, run
+from .events import EventKind, ExecutionEvent, ExecutionEventConsumer
+from .flow import Flow, RunConfig, run
 from .partition import DatePartitionDef
+from .plan import FlowPlan
+from .results import RunResult
 
-__all__ = ["asset", "AssetContext", "DatePartitionDef", "RunConfig", "run"]
+__all__ = [
+    "asset",
+    "AssetContext",
+    "DatePartitionDef",
+    "EventKind",
+    "ExecutionEvent",
+    "ExecutionEventConsumer",
+    "Flow",
+    "FlowPlan",
+    "RunConfig",
+    "RunResult",
+    "run",
+]
