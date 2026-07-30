@@ -53,11 +53,55 @@ assert result.status.value == "success"
 assert result.tasks[-1].attempts[0].output == 2
 ```
 
-`Flow.plan()` provides deterministic task order, dependencies, selected partitions,
-and run configuration before execution. `run()` and `Flow.run_async()` return a
-`RunResult` containing flow, task, and partition-attempt statuses, timings, outputs,
-and serializable failure metadata. A failed asset is represented in the returned
-result, while independent branches continue when possible.
+## Review a flow before running it
+
+For a flow you wrote yourself or received from an AI or another person, use the plan
+as an explicit review step before deciding to run it. `Flow.plan()` is
+side-effect-free: it describes the selected work but does not invoke an asset.
+
+```python
+from kazeflow import Flow, run
+
+
+flow = Flow(["summarize"])
+run_config = {"max_concurrency": 2}
+plan = flow.plan(run_config)
+
+# Review the exact targets, dependency-first task order, and partition selections.
+assert plan.targets == ("summarize",)
+for task in plan.tasks:
+    print(task.name, task.dependencies, task.partition_keys)
+
+# Review the normalized execution settings before choosing whether to run.
+print(plan.config.max_concurrency, plan.config.partition_keys)
+
+# The caller makes the decision to execute after reviewing this information.
+result = run(["summarize"], run_config)
+
+# Inspect the flow result, then each task and partition attempt.
+print(result.status, result.started_at, result.ended_at)
+for task in result.tasks:
+    print(task.task.task_name, task.status)
+    for attempt in task.attempts:
+        print(attempt.attempt.partition_key, attempt.status)
+        print(attempt.output, attempt.failure, attempt.blocked_by)
+```
+
+`FlowPlan` is structured pre-execution information: selected targets,
+dependency-first task order, partition selections, and normalized run configuration.
+`RunResult` is structured terminal information for one run: flow, task, and
+partition-attempt statuses, timings, outputs, and serializable failure metadata.
+Logs are optional, time-ordered detail for progress and diagnosis. They do not
+replace reviewing a plan before execution or inspecting a result afterward.
+
+Review support helps make a declared flow easier to understand; it is not a security
+sandbox, a proof that code is safe, a way to prevent asset side effects, or an
+automatic approval to execute. Asset functions are arbitrary Python, including when
+they were AI-generated: review the code itself and decide whether to run it.
+
+For a partitioned flow with a failed and dependency-blocked attempt, see the
+[review workflow guide](docs/reviewable-flows.md) and its runnable
+[core-only example](examples/review_flow.py).
 
 ## Logging from an asset
 
