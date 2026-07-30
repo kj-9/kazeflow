@@ -30,4 +30,24 @@ jobs:
       - name: Run check
         run: |
           make ci-check
-
+  package:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Verify lockfile
+        run: uv lock --check
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Verify built-wheel metadata
+        run: python scripts/verify_wheel_metadata.py dist
+      - name: Smoke-test core-only wheel installation
+        run: python scripts/smoke_wheel_install.py --wheel dist --mode core
+      - name: Smoke-test TUI-enabled wheel installation
+        run: python scripts/smoke_wheel_install.py --wheel dist --mode tui

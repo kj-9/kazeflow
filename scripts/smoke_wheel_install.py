@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Run a core or TUI smoke test from an isolated installed wheel."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import textwrap
+import venv
+
+
+CORE_PROGRAM = """
+import sys
+
+import kazeflow
+from kazeflow import Flow, FlowPlan, RunResult
+from kazeflow.results import AttemptStatus, FlowStatus
+
+side_effects = []
+
+
+@kazeflow.asset
+def complete():
+    side_effects.append("ran")
+    return "complete"
+
+
+plan = Flow(["complete"]).plan()
+assert isinstance(plan, FlowPlan)
+assert plan.tasks[0].name == "complete"
+assert side_effects == []
+
+result = kazeflow.run(["complete"])
+assert isinstance(result, RunResult)
+assert result.status is FlowStatus.SUCCESS
+assert result.tasks[0].status is AttemptStatus.SUCCESS
+assert result.tasks[0].attempts[0].output == "complete"
+assert side_effects == ["ran"]
+assert not any(name == "rich" or name.startswith("rich.") for name in sys.modules)
+"""
+
+TUI_PROGRAM = """
+from kazeflow.tui import FlowTUIRenderer
+
+renderer = FlowTUIRenderer(total_assets=0)
+assert renderer.overall_progress.tasks[0].total == 0
+"""
+
+
+def _run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
+    subprocess.run(command, cwd=cwd, env=env, check=True)
+
+
+def _resolve_wheel(path: Path) -> Path:
+    if path.is_file():
+        return path
+    if not path.is_dir():
+        raise FileNotFoundError(path)
+
+    wheels = sorted(path.glob("kazeflow-*.whl"))
+    if len(wheels) != 1:
+        raise AssertionError(
+            f"expected exactly one kazeflow wheel in {path}, found {wheels}"
+        )
+    return wheels[0]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--wheel", required=True, type=Path)
+    parser.add_argument("--mode", required=True, choices=("core", "tui"))
+    args = parser.parse_args()
+    wheel = _resolve_wheel(args.wheel).resolve()
+
+    with tempfile.TemporaryDirectory(prefix="kazeflow-wheel-smoke-") as temporary:
+        root = Path(temporary)
+        environment = root / "environment"
+        outside_checkout = root / "outside-checkout"
+        outside_checkout.mkdir()
+        venv.EnvBuilder(with_pip=True).create(environment)
+        python = environment / "bin" / "python"
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+
+        if args.mode == "core":
+            _run(
+                [str(python), "-m", "pip", "install", "--no-deps", str(wheel)],
+                cwd=outside_checkout,
+                env=env,
+            )
+            program = CORE_PROGRAM
+        else:
+            _run(
+                [str(python), "-m", "pip", "install", f"{wheel}[tui]"],
+                cwd=outside_checkout,
+                env=env,
+            )
+            program = TUI_PROGRAM
+
+        _run(
+            [str(python), "-c", textwrap.dedent(program)],
+            cwd=outside_checkout,
+            env=env,
+        )
+
+
+if __name__ == "__main__":
+    main()
