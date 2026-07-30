@@ -1,94 +1,102 @@
-
 # kazeflow
 
-`kazeflow` is a lightweight, asset-based task flow engine inspired by Dagster. It is designed to be simple, flexible, and easy to use.
+`kazeflow` is a lightweight, asset-based task flow engine for small Python
+programs. Define ordinary functions as assets, inspect their dependency plan, then
+run selected targets and receive a structured result.
 
-## Example
+## Define, inspect, and run a flow
 
-Here is a simple example of how to use `kazeflow` to define and execute a data flow with dependencies, inputs/outputs, and logging.
+Assets remain plain Python functions. Dependencies can be inferred from parameter
+names or declared explicitly with `deps`.
 
-When you run this script, `kazeflow` will execute the assets in the correct order based on their dependencies and provide a rich terminal UI to visualize the progress.
-
-
-`example.py`:
 ```python
-import time
-from pathlib import Path
+import kazeflow
+from kazeflow.flow import Flow
+
+
+@kazeflow.asset
+def create_raw_data() -> list[str]:
+    return ["hello", "kazeflow"]
+
+
+@kazeflow.asset
+def summarize(create_raw_data: list[str]) -> int:
+    return len(create_raw_data)
+
+
+run_config = {"max_concurrency": 2}
+flow = Flow(["summarize"])
+
+# Planning validates the selected dependency closure without running either asset.
+plan = flow.plan(run_config)
+for task in plan.tasks:
+    print(task.name, task.dependencies)
+
+# The default execution path is quiet and returns a structured RunResult.
+result = kazeflow.run(["summarize"], run_config)
+assert result.status.value == "success"
+assert result.tasks[-1].attempts[0].output == 2
+```
+
+`Flow.plan()` provides deterministic task order, dependencies, selected partitions,
+and run configuration before execution. `run()` and `Flow.run_async()` return a
+`RunResult` containing flow, task, and partition-attempt statuses, timings, outputs,
+and serializable failure metadata. A failed asset is represented in the returned
+result, while independent branches continue when possible.
+
+## Logging from an asset
+
+An asset that accepts `context: kazeflow.AssetContext` receives a standard-library
+logger and, for partitioned work, its partition key. kazeflow does not configure
+global logging: configure handlers in the application if those messages should be
+shown.
+
+```python
+import logging
 
 import kazeflow
 
+logging.basicConfig(level=logging.INFO)
 
-# Asset 1: Create a raw data file
+
 @kazeflow.asset
-def create_raw_data(context: kazeflow.AssetContext) -> Path:
-    """Creates a dummy raw data file."""
-    context.logger.info("Creating raw data file...")
-    raw_data_path = Path("raw_data.txt")
-    raw_data_path.write_text("hello world\nkazeflow is awesome\nhello kazeflow")
-    time.sleep(1)
-    context.logger.info(f"Raw data created at {raw_data_path}")
-    return raw_data_path
+def report(context: kazeflow.AssetContext) -> str:
+    context.logger.info("creating the report")
+    return "done"
+```
+
+## Opt into Rich terminal rendering
+
+Core execution never creates a terminal UI. To render lifecycle progress, explicitly
+import the Rich-backed adapter, enter its presentation context, and pass it as the
+event consumer. The renderer observes neutral execution events; it does not change
+planning, scheduling, outputs, statuses, or failure handling.
+
+```python
+import kazeflow
+from kazeflow.flow import Flow
+from kazeflow.tui import FlowTUIRenderer, show_plan_tree
 
 
-# Asset 2: Process the raw data file
-@kazeflow.asset
-def process_data(create_raw_data: Path, context: kazeflow.AssetContext) -> Path:
-    """Reads the raw data, processes it, and saves to a new file."""
-    context.logger.info(f"Processing data from {create_raw_data}...")
-    processed_data_path = Path("processed_data.txt")
-    content = create_raw_data.read_text()
-    processed_content = content.upper()
-    processed_data_path.write_text(processed_content)
-    time.sleep(1)
-    context.logger.info(f"Processed data saved at {processed_data_path}")
-    return processed_data_path
+flow = Flow(["summarize"])
+run_config = {"max_concurrency": 2}
+plan = flow.plan(run_config)
 
+# This is an explicit presentation choice and does not execute assets.
+show_plan_tree(plan)
 
-# Asset 3: Summarize the results
-@kazeflow.asset
-def summarize(process_data: Path, context: kazeflow.AssetContext):
-    """Reads the processed data and prints a summary."""
-    context.logger.info(f"Summarizing data from {process_data}...")
-    content = process_data.read_text()
-    word_count = len(content.split())
-    context.logger.info(f"Summary: The processed file contains {word_count} words.")
-    time.sleep(1)
-
-
-if __name__ == "__main__":
-    kazeflow.run(
-        asset_names=["summarize"],
-        run_config={"max_concurrency": 2},
+with FlowTUIRenderer(total_assets=len(plan.tasks)) as renderer:
+    result = kazeflow.run(
+        ["summarize"], run_config, event_consumer=renderer
     )
 
+assert result.status.value == "success"
 ```
 
-This will produce the following output:
+For asynchronous applications, use the same renderer around `await
+flow.run_async(run_config, event_consumer=renderer)`. If a run is cancelled, the
+renderer closes safely after the event prefix already observed.
 
-```bash
-❯ uv run python example.py
-Task Flow (Execution Order)
-└── create_raw_data
-    └── process_data
-        └── summarize
-
-Execution Logs
-INFO     Executing asset: create_raw_data                                       
-INFO     Creating raw data file...                                              
-INFO     Raw data created at raw_data.txt                                       
-INFO     Finished executing asset: create_raw_data in 1.01s                     
-INFO     Executing asset: process_data                                          
-INFO     Processing data from raw_data.txt...                                   
-INFO     Processed data saved at processed_data.txt                             
-INFO     Finished executing asset: process_data in 1.01s                        
-INFO     Executing asset: summarize                                             
-INFO     Summarizing data from processed_data.txt...                            
-INFO     Summary: The processed file contains 7 words.                          
-INFO     Finished executing asset: summarize in 1.01s                           
-╭─────────────────────────────────── Assets ───────────────────────────────────╮
-│ ✓ create_raw_data                (1.01s)                                     │
-│ ✓ process_data                   (1.01s)                                     │
-│ ✓ summarize                      (1.01s)                                     │
-╰──────────────────────────────────────────────────────────────────────────────╯
-Overall Progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3/3 0:00:03
-```
+Rich presentation is selected only by importing `kazeflow.tui` and passing a
+renderer. Package metadata for a dedicated TUI extra is planned separately; this
+release does not require a special install command for the example above.
