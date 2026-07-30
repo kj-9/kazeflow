@@ -4,22 +4,37 @@
 programs. Define ordinary functions as assets, inspect their dependency plan, then
 run selected targets and receive a structured result.
 
+## Install
+
+Install the standard-library-only core to define assets, inspect plans, and run
+flows:
+
+```bash
+pip install kazeflow
+```
+
+Rich terminal rendering is optional. Install it only when you want to use the TUI
+adapter:
+
+```bash
+pip install "kazeflow[tui]"
+```
+
 ## Define, inspect, and run a flow
 
 Assets remain plain Python functions. Dependencies can be inferred from parameter
 names or declared explicitly with `deps`.
 
 ```python
-import kazeflow
-from kazeflow.flow import Flow
+from kazeflow import Flow, asset, run
 
 
-@kazeflow.asset
+@asset
 def create_raw_data() -> list[str]:
     return ["hello", "kazeflow"]
 
 
-@kazeflow.asset
+@asset
 def summarize(create_raw_data: list[str]) -> int:
     return len(create_raw_data)
 
@@ -33,7 +48,7 @@ for task in plan.tasks:
     print(task.name, task.dependencies)
 
 # The default execution path is quiet and returns a structured RunResult.
-result = kazeflow.run(["summarize"], run_config)
+result = run(["summarize"], run_config)
 assert result.status.value == "success"
 assert result.tasks[-1].attempts[0].output == 2
 ```
@@ -67,14 +82,13 @@ def report(context: kazeflow.AssetContext) -> str:
 
 ## Opt into Rich terminal rendering
 
-Core execution never creates a terminal UI. To render lifecycle progress, explicitly
-import the Rich-backed adapter, enter its presentation context, and pass it as the
-event consumer. The renderer observes neutral execution events; it does not change
-planning, scheduling, outputs, statuses, or failure handling.
+After installing `kazeflow[tui]`, explicitly import the Rich-backed adapter, enter
+its presentation context, and pass it as the event consumer. Core execution never
+creates a terminal UI. The renderer observes neutral execution events; it does not
+change planning, scheduling, outputs, statuses, or failure handling.
 
 ```python
-import kazeflow
-from kazeflow.flow import Flow
+from kazeflow import Flow, run
 from kazeflow.tui import FlowTUIRenderer, show_plan_tree
 
 
@@ -86,7 +100,7 @@ plan = flow.plan(run_config)
 show_plan_tree(plan)
 
 with FlowTUIRenderer(total_assets=len(plan.tasks)) as renderer:
-    result = kazeflow.run(
+    result = run(
         ["summarize"], run_config, event_consumer=renderer
     )
 
@@ -96,7 +110,3 @@ assert result.status.value == "success"
 For asynchronous applications, use the same renderer around `await
 flow.run_async(run_config, event_consumer=renderer)`. If a run is cancelled, the
 renderer closes safely after the event prefix already observed.
-
-Rich presentation is selected only by importing `kazeflow.tui` and passing a
-renderer. Package metadata for a dedicated TUI extra is planned separately; this
-release does not require a special install command for the example above.
