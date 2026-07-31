@@ -7,7 +7,34 @@ permissions:
   contents: read
 
 jobs:
+  release-version:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: astral-sh/setup-uv@v6
+      with:
+        python-version: "3.13"
+        enable-cache: true
+    - name: Verify release tag matches project version
+      run: |
+        uv run --no-project --python 3.13 python - <<'PY'
+        import os
+        from pathlib import Path
+        import tomllib
+
+        with Path("pyproject.toml").open("rb") as project_file:
+            project_version = tomllib.load(project_file)["project"]["version"]
+
+        release_tag = os.environ["GITHUB_REF_NAME"]
+        normalized_tag = release_tag.removeprefix("v")
+        if normalized_tag != project_version:
+            raise SystemExit(
+                "release tag must equal the project version, optionally prefixed "
+                f"with 'v': tag={release_tag!r}, version={project_version!r}"
+            )
+        PY
   test:
+    needs: release-version
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -18,6 +45,9 @@ jobs:
       with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+    - name: Run static checks
+      run: |
+        make ci-check
     - name: Run tests
       run: |
         make test
@@ -33,7 +63,7 @@ jobs:
       run: python scripts/smoke_wheel_install.py --wheel dist --mode tui
   deploy:
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [release-version, test]
     environment: release
     permissions:
       id-token: write
