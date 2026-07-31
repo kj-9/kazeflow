@@ -103,6 +103,14 @@ For a partitioned flow with a failed and dependency-blocked attempt, see the
 [review workflow guide](docs/reviewable-flows.md) and its runnable
 [core-only example](examples/review_flow.py).
 
+## Persist run records explicitly
+
+Core execution never creates a database or persists run history. To opt into a
+caller-owned SQLite database, construct `SQLiteRunStore` explicitly. Its stored
+records are portable but deliberately lossy: they omit raw outputs, exceptions, and
+partition keys. See the [SQLite run-store guide](docs/sqlite-run-store.md) for the
+adapter API and schema compatibility behavior.
+
 ## Logging from an asset
 
 An asset that accepts `context: kazeflow.AssetContext` receives a standard-library
