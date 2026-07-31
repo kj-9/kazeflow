@@ -322,6 +322,66 @@ def test_duplicate_saves_and_missing_loads_do_not_modify_history(tmp_path) -> No
         assert [summary.run_id for summary in store.list_runs()] == ["only-once"]
 
 
+@pytest.mark.parametrize("invalid_record", ["empty", "mismatched-envelope"])
+def test_invalid_runresult_projection_does_not_persist_or_block_retry(
+    tmp_path, invalid_record: str
+) -> None:
+    valid = _unpartitioned_result("retry-after-invalid-projection")
+
+    class InvalidProjection(RunResult):
+        def to_record(self) -> dict[str, object]:
+            if invalid_record == "empty":
+                return {}
+            record = super().to_record()
+            record["run_id"] = "different-run-id"
+            record["status"] = "failed"
+            return record
+
+    invalid = InvalidProjection(
+        valid.run_id,
+        valid.status,
+        valid.started_at,
+        valid.ended_at,
+        valid.duration,
+        valid.tasks,
+    )
+
+    with SQLiteRunStore(tmp_path / "runs.sqlite3") as store:
+        with pytest.raises(ValueError):
+            store.save(invalid)
+        assert store.list_runs() == ()
+
+        saved = store.save(valid)
+        assert saved.record == valid.to_record()
+        assert store.load(valid.run_id).record == valid.to_record()
+
+
+def test_constructor_rejects_invalid_paths_before_creating_a_database(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(TypeError, match="str or pathlib.Path"):
+        SQLiteRunStore(None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="must not be empty"):
+        SQLiteRunStore("")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("path_kind", ["string", "path"])
+def test_constructor_accepts_string_and_path_database_paths(
+    tmp_path, path_kind: str
+) -> None:
+    path = tmp_path / f"{path_kind}.sqlite3"
+    database_path = str(path) if path_kind == "string" else path
+
+    with SQLiteRunStore(database_path) as store:
+        assert store.schema_version == CURRENT_SCHEMA_VERSION
+
+    assert path.exists()
+
+
 @pytest.mark.parametrize("key", [0, "", False, OpaqueValue()])
 def test_portable_records_keep_partition_presence_without_raw_values(
     tmp_path, key

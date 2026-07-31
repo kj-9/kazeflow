@@ -83,6 +83,10 @@ class SQLiteRunStore:
     _MIGRATIONS: dict[int, tuple[str, ...]] = {}
 
     def __init__(self, path: str | Path) -> None:
+        if not isinstance(path, (str, Path)):
+            raise TypeError("path must be a str or pathlib.Path")
+        if isinstance(path, str) and not path:
+            raise ValueError("path must not be empty")
         self._path = str(path)
         self._connection = sqlite3.connect(self._path)
         try:
@@ -119,6 +123,13 @@ class SQLiteRunStore:
             sort_keys=True,
         )
         saved_at = datetime.now(timezone.utc)
+        stored = StoredRunRecord(
+            run_id=result.run_id,
+            schema_version=CURRENT_SCHEMA_VERSION,
+            status=result.status.value,
+            saved_at=saved_at,
+            record_json=record_json,
+        )
         try:
             with self._connection:
                 self._connection.execute(
@@ -127,23 +138,17 @@ class SQLiteRunStore:
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (
-                        result.run_id,
-                        CURRENT_SCHEMA_VERSION,
-                        result.status.value,
-                        saved_at.isoformat(),
-                        record_json,
+                        stored.run_id,
+                        stored.schema_version,
+                        stored.status,
+                        stored.saved_at.isoformat(),
+                        stored.record_json,
                     ),
                 )
         except sqlite3.IntegrityError as error:
-            raise ValueError(f"run id already exists: {result.run_id}") from error
+            raise ValueError(f"run id already exists: {stored.run_id}") from error
 
-        return StoredRunRecord(
-            run_id=result.run_id,
-            schema_version=CURRENT_SCHEMA_VERSION,
-            status=result.status.value,
-            saved_at=saved_at,
-            record_json=record_json,
-        )
+        return stored
 
     def load(self, run_id: str) -> StoredRunRecord:
         """Load a persistent portable record without rebuilding a ``RunResult``."""
