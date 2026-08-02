@@ -9,6 +9,9 @@ authors = [
 requires-python = ">=3.10"
 dependencies = []
 
+[project.scripts]
+kazeflow = "kazeflow.cli:main"
+
 [project.optional-dependencies]
 tui = ["rich>=14.1.0"]
 

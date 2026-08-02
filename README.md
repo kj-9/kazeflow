@@ -99,6 +99,34 @@ sandbox, a proof that code is safe, a way to prevent asset side effects, or an
 automatic approval to execute. Asset functions are arbitrary Python, including when
 they were AI-generated: review the code itself and decide whether to run it.
 
+## Inspect a script from the command line
+
+The core installation also provides `kazeflow assets` and `kazeflow plan` for
+reviewing a trusted Python flow script from the shell. A bare script entry discovers
+the assets registered while the script loads. If it provides a module-level `flow`,
+that flow supplies the default targets; otherwise `plan` derives all discovered
+terminal assets as its targets.
+
+```bash
+# List assets discovered while loading the script.
+kazeflow assets path/to/flow.py
+
+# Review the default targets and their dependency-first plan.
+kazeflow plan path/to/flow.py
+
+# Review one target, or emit one machine-readable JSON document to stdout.
+kazeflow plan path/to/flow.py --target summarize
+kazeflow plan path/to/flow.py --format json
+```
+
+`assets` and `plan` do not call asset functions. Loading a script is still ordinary
+Python execution, however, so its top-level statements and imports can have side
+effects. Treat a script entry as trusted code to load; the inspection commands are
+not a sandbox or a safety approval. The current CLI only inspects flows: `run`, Rich
+TUI integration, and SQLite record storage are not CLI features. See the
+[CLI guide](docs/cli.md) for entry forms, target selection, JSON output, and error
+handling.
+
 For a partitioned flow with a failed and dependency-blocked attempt, see the
 [review workflow guide](docs/reviewable-flows.md) and its runnable
 [core-only example](examples/review_flow.py).

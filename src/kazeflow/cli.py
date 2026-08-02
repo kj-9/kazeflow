@@ -1,0 +1,352 @@
+"""The standard-library command line interface for inspecting kazeflow flows.
+
+Loading an entry runs ordinary user Python and can therefore have import-time
+side effects.  Inspection never invokes an asset body, but it is not a
+sandbox or an approval mechanism.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import importlib.util
+import json
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+from types import ModuleType
+from typing import Any, Sequence
+from uuid import uuid4
+
+from .assets import Asset, AssetRegistry, default_registry
+from .flow import Flow
+from .plan import FlowPlan
+
+
+EXIT_SUCCESS = 0
+EXIT_USAGE = 2
+EXIT_ENTRY = 3
+EXIT_INFRASTRUCTURE = 4
+
+
+class _UsageError(Exception):
+    pass
+
+
+class _EntryError(Exception):
+    pass
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise _UsageError(message)
+
+
+@dataclass(frozen=True)
+class _LoadedEntry:
+    flow: Flow | None
+    assets: tuple[Asset, ...]
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = _Parser(
+        prog="kazeflow",
+        description=(
+            "Inspect a trusted Python flow. Loading an entry executes user Python; "
+            "inspection does not execute asset bodies."
+        ),
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    assets = commands.add_parser("assets", help="list assets loaded from an entry")
+    assets.add_argument("entry", help="a Python file or module:attribute entry")
+    assets.add_argument("--format", choices=("text", "json"), default="text")
+
+    plan = commands.add_parser("plan", help="build a plan without executing assets")
+    plan.add_argument("entry", help="a Python file or module:attribute entry")
+    plan.add_argument("--target", dest="targets", action="append", default=[])
+    plan.add_argument(
+        "--partition-key", "--partition", dest="partition_keys", action="append"
+    )
+    plan.add_argument("--max-concurrency", type=int)
+    plan.add_argument("--format", choices=("text", "json"), default="text")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI and return its process status without raising user errors."""
+    parser = _parser()
+    try:
+        args = parser.parse_args(argv)
+        _validate_entry_syntax(args.entry)
+        if args.command == "assets":
+            loaded = _load_entry(args.entry)
+            _emit_assets(loaded, args.format)
+        else:
+            loaded = _load_entry(args.entry)
+            _emit_plan(loaded, args)
+    except _UsageError as error:
+        _diagnostic(str(error))
+        return EXIT_USAGE
+    except _EntryError as error:
+        _diagnostic(str(error))
+        return EXIT_ENTRY
+    except (TypeError, ValueError) as error:
+        _diagnostic(str(error))
+        return EXIT_USAGE
+    except SystemExit as error:
+        # argparse uses SystemExit only for --help in this adapter.
+        return int(error.code) if isinstance(error.code, int) else EXIT_USAGE
+    except Exception as error:  # pragma: no cover - defensive process boundary
+        _diagnostic(f"internal CLI error: {error}")
+        return EXIT_INFRASTRUCTURE
+    return EXIT_SUCCESS
+
+
+def _validate_entry_syntax(entry: str) -> None:
+    if not entry or entry.count(":") > 1:
+        raise _UsageError("entry must be a Python file or module:attribute")
+    if ":" in entry:
+        source, attribute = entry.split(":", 1)
+        if not source or not attribute or "." in attribute:
+            raise _UsageError("explicit entries must use source:attribute")
+    elif not entry.endswith(".py"):
+        raise _UsageError("bare entries must be Python files ending in .py")
+
+
+def _load_entry(entry: str) -> _LoadedEntry:
+    if ":" not in entry:
+        module, discovered = _load_file(entry)
+        flow = getattr(module, "flow", None)
+        if flow is not None and not isinstance(flow, Flow):
+            flow = None
+        if isinstance(flow, Flow):
+            _localize_default_registry(flow, discovered)
+        if flow is None and not discovered:
+            raise _EntryError("entry defines neither a Flow named 'flow' nor assets")
+        return _LoadedEntry(flow, discovered)
+
+    source, attribute = entry.split(":", 1)
+    is_file = source.endswith(".py")
+    if is_file:
+        module, discovered = _load_file(source)
+    else:
+        module, discovered = _load_module(source)
+    try:
+        value = getattr(module, attribute)
+    except AttributeError as error:
+        raise _EntryError(f"entry attribute not found: {entry}") from error
+    flow, discovered = _resolve_explicit_flow(value, entry, discovered, is_file=is_file)
+    if is_file:
+        _localize_default_registry(flow, discovered)
+    return _LoadedEntry(flow, discovered)
+
+
+def _load_module(name: str) -> tuple[ModuleType, tuple[Asset, ...]]:
+    before = dict(default_registry._assets)
+    try:
+        module = importlib.import_module(name)
+    except Exception as error:
+        raise _EntryError(f"could not load entry module {name!r}: {error}") from error
+    return module, _registry_delta(before)
+
+
+def _load_file(source: str) -> tuple[ModuleType, tuple[Asset, ...]]:
+    path = Path(source)
+    if not path.is_file():
+        raise _EntryError(f"entry file not found: {source}")
+    before = dict(default_registry._assets)
+    module_name = f"_kazeflow_entry_{uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise _EntryError(f"could not load entry file: {source}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    sys.path.insert(0, str(path.parent.resolve()))
+    discovered: tuple[Asset, ...] = ()
+    try:
+        spec.loader.exec_module(module)
+        discovered = _registry_delta(before)
+    except Exception as error:
+        raise _EntryError(f"could not load entry file {source!r}: {error}") from error
+    finally:
+        sys.path.pop(0)
+        sys.modules.pop(module_name, None)
+        default_registry._assets.clear()
+        default_registry._assets.update(before)
+    return module, discovered
+
+
+def _registry_delta(before: dict[str, Asset]) -> tuple[Asset, ...]:
+    return tuple(
+        default_registry._assets[name]
+        for name in sorted(default_registry._assets)
+        if before.get(name) is not default_registry._assets[name]
+    )
+
+
+def _resolve_explicit_flow(
+    value: Any, entry: str, discovered: tuple[Asset, ...], *, is_file: bool
+) -> tuple[Flow, tuple[Asset, ...]]:
+    if isinstance(value, Flow):
+        return value, discovered
+    if not callable(value):
+        raise _EntryError(f"entry {entry!r} does not resolve to a Flow")
+    before = dict(default_registry._assets)
+    if is_file:
+        default_registry._assets.clear()
+        default_registry._assets.update({asset.name: asset for asset in discovered})
+    try:
+        resolved = value()
+    except Exception as error:
+        raise _EntryError(f"Flow factory {entry!r} failed: {error}") from error
+    finally:
+        if is_file:
+            discovered = _registry_delta({})
+            default_registry._assets.clear()
+            default_registry._assets.update(before)
+    if not isinstance(resolved, Flow):
+        raise _EntryError(f"Flow factory {entry!r} did not return a Flow")
+    return resolved, discovered
+
+
+def _localize_default_registry(flow: Flow, discovered: tuple[Asset, ...]) -> None:
+    """Keep a file-defined default-registry flow valid after global state restores."""
+    if flow.registry is not default_registry:
+        return
+    registry = AssetRegistry()
+    registry._assets.update({asset.name: asset for asset in discovered})
+    flow.registry = registry
+
+
+def _emit_assets(loaded: _LoadedEntry, output_format: str) -> None:
+    assets = loaded.assets
+    if not assets and loaded.flow is not None:
+        assets = tuple(
+            loaded.flow.registry.get(name)
+            for name in sorted(loaded.flow.registry._assets)
+        )
+    if not assets:
+        raise _EntryError("entry defines no inspectable assets")
+    records = [
+        _asset_record(asset) for asset in sorted(assets, key=lambda asset: asset.name)
+    ]
+    if output_format == "json":
+        _json_output(
+            {
+                "schema_version": 1,
+                "declared_flow": loaded.flow is not None,
+                "assets": records,
+            }
+        )
+        return
+    print("Assets:")
+    for asset in records:
+        dependencies = ", ".join(asset["dependencies"]) or "none"
+        partitioned = "yes" if asset["partitioned"] else "no"
+        print(
+            f"- {asset['name']} (dependencies: {dependencies}; partitioned: {partitioned})"
+        )
+
+
+def _emit_plan(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
+    targets = list(args.targets)
+    if loaded.flow is None:
+        if not targets:
+            targets = list(_terminal_assets(loaded.assets))
+        flow = Flow(targets, registry=_registry_for(loaded.assets))
+    else:
+        flow = (
+            loaded.flow if not targets else Flow(targets, registry=loaded.flow.registry)
+        )
+    config: dict[str, Any] = {}
+    if args.max_concurrency is not None:
+        config["max_concurrency"] = args.max_concurrency
+    if args.partition_keys is not None:
+        config["partition_keys"] = args.partition_keys
+    plan = flow.plan(config or None)
+    if args.format == "json":
+        _json_output(_plan_record(plan))
+        return
+    _text_plan(plan)
+
+
+def _registry_for(assets: tuple[Asset, ...]) -> AssetRegistry:
+    registry = AssetRegistry()
+    registry._assets.update({asset.name: asset for asset in assets})
+    return registry
+
+
+def _terminal_assets(assets: tuple[Asset, ...]) -> tuple[str, ...]:
+    names = {asset.name for asset in assets}
+    dependencies = {
+        dependency
+        for asset in assets
+        for dependency in asset.deps
+        if dependency in names
+    }
+    return tuple(sorted(names - dependencies))
+
+
+def _asset_record(asset: Asset) -> dict[str, Any]:
+    return {
+        "name": asset.name,
+        "dependencies": sorted(asset.deps),
+        "partitioned": asset.partition_def is not None,
+    }
+
+
+def _plan_record(plan: FlowPlan) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "targets": list(plan.targets),
+        "config": {
+            "max_concurrency": plan.config.max_concurrency,
+            "partition_key_count": (
+                None
+                if plan.config.partition_keys is None
+                else len(plan.config.partition_keys)
+            ),
+        },
+        "tasks": [
+            {
+                "name": task.name,
+                "dependencies": list(task.dependencies),
+                "partition_key_count": (
+                    None if task.partition_keys is None else len(task.partition_keys)
+                ),
+            }
+            for task in plan.tasks
+        ],
+    }
+
+
+def _text_plan(plan: FlowPlan) -> None:
+    print("Targets:")
+    for target in plan.targets:
+        print(f"- {target}")
+    print("Configuration:")
+    print(
+        f"- max_concurrency: {plan.config.max_concurrency if plan.config.max_concurrency is not None else 'default'}"
+    )
+    count = plan.config.partition_keys
+    print(
+        f"- partition_keys: {'not supplied' if count is None else f'{len(count)} selected'}"
+    )
+    print("Tasks (dependency-first):")
+    for task in plan.tasks:
+        dependencies = ", ".join(task.dependencies) or "none"
+        partitions = (
+            "unpartitioned"
+            if task.partition_keys is None
+            else f"{len(task.partition_keys)} selected"
+        )
+        print(f"- {task.name} (dependencies: {dependencies}; partitions: {partitions})")
+
+
+def _json_output(value: dict[str, Any]) -> None:
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def _diagnostic(message: str) -> None:
+    print(f"kazeflow: {message}", file=sys.stderr)

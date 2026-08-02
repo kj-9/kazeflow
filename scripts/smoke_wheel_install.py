@@ -13,6 +13,9 @@ import venv
 
 
 CORE_PROGRAM = """
+import json
+from pathlib import Path
+import subprocess
 import sys
 
 import kazeflow
@@ -40,6 +43,37 @@ assert result.tasks[0].status is AttemptStatus.SUCCESS
 assert result.tasks[0].attempts[0].output == "complete"
 assert side_effects == ["ran"]
 assert not any(name == "rich" or name.startswith("rich.") for name in sys.modules)
+
+flow_file = Path("smoke_flow.py")
+flow_file.write_text(
+    '''
+from kazeflow import asset
+
+@asset
+def source():
+    return "not called"
+
+@asset
+def publish(source):
+    return "not called"
+''',
+    encoding="utf-8",
+)
+command = Path(sys.executable).with_name("kazeflow")
+assets = subprocess.run(
+    [str(command), "assets", str(flow_file), "--format", "json"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+assert [asset["name"] for asset in json.loads(assets.stdout)["assets"]] == ["publish", "source"]
+plan_cli = subprocess.run(
+    [str(command), "plan", str(flow_file), "--format", "json"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+assert json.loads(plan_cli.stdout)["targets"] == ["publish"]
 """
 
 TUI_PROGRAM = """
