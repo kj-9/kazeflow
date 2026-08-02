@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M6 Complete
+> Status: M0–M6 Complete; M7–M11 Proposed
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -31,6 +31,20 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M4: zero-dependency coreとcore/TUI package checksを実装済み。
 - M5: reviewable flow workflowのdocumentationとexampleを整備済み。
 - M6: 明示的なSQLite run-store adapter、schema version、migration、round-trip testsを実装し、archive済み。
+
+## Next direction: a reviewable CLI
+
+次の段階では、Pythonで定義したflowを、実行前に確認し、明示的な判断のもとで実行・記録・比較するための
+CLIを整える。CLIはscript-firstなPython APIの代替ではなく、既存の`FlowPlan`と`RunResult`を人間、CI、AI agentが
+扱うための薄い入口とする。
+
+CLI自体もPython標準ライブラリだけで動作させる。TUIとSQLite保存は既存のoptional featureまたは明示的なadapterのままとし、
+scheduler、daemon、remote execution、sandbox、暗黙のcacheを追加しない。これはzero-dependency、infrastructure-free、
+anti-platformの境界を守るためである。
+
+flow entry pointを読むには利用者のPython moduleをimportする必要がある。CLIはasset本体をplan時に実行しないが、
+通常のPython import時副作用までは防げない。したがってCLIはsandboxや安全な実行保証ではなく、実行対象を確認するための
+review支援として扱う。
 
 ## Roadmap
 
@@ -184,6 +198,101 @@ SQLiteはPython標準ライブラリから利用できるが、永続化機能�
 - 任意のPython output、exception、partition keyを保存する範囲が明記されている。
 - adapterを利用しないcoreのAPIと挙動が変わらない。
 
+### M7: Define the CLI contract
+
+OpenSpec change: `define-cli-contracts`
+
+CLIの公開契約を、実装より先に固定する。
+
+対象:
+
+- `path/to/flow.py:flow`と`package.module:flow`のentry point形式
+- `Flow`と、`Flow`を返す明示的なfactoryの解決規則
+- import時副作用の境界と、planがasset本体を実行しない保証
+- stdout/stderr、text/JSON出力、exit codeの契約
+- `plan`と`run`のreview責務、実行済みfailureとCLI/load/config errorの区別
+- JSON投影でraw output、例外object、partition keyを露出しない既存record境界
+
+完了条件:
+
+- CLIがsecurity sandboxや自動承認機構ではないことを明記する。
+- Python APIとCLIのplan/result semanticsが一致する。
+- Python 3.10–3.13でstdlib-onlyのCLI smoke testがある。
+
+### M8: Add an inspectable `plan` command
+
+OpenSpec change: `add-flow-plan-cli`
+
+実行せずにflowを読み込み、レビュー可能な計画を表示する。
+
+対象:
+
+- target、依存順、partition、実行設定を含む決定的なtext表示
+- `FlowPlan`のstableでmachine-readableなJSON投影
+- target、partition、max concurrencyなどの明示的なrun config指定
+- entry point、cycle、missing dependency、不正configの診断
+
+完了条件:
+
+- `plan`はasset関数を呼ばない。
+- 同じentry pointとconfigから同じtext順序とJSONを得られる。
+- JSONはstdoutだけに出力し、診断はstderrへ出す。
+
+### M9: Add a deliberate `run` command
+
+OpenSpec change: `add-reviewed-run-cli`
+
+表示したplanと同じ条件で実行し、構造化結果を返す。
+
+対象:
+
+- 実行前のplan summaryと、対話端末での明示確認
+- 非対話環境での`--yes`必須化
+- `RunResult`のtext/JSON要約と、成功、asset failure、CLI使用error、flow load errorを区別するexit code
+- `--store`指定時だけの`SQLiteRunStore`保存
+- optional Rich TUIを明示的に選ぶ入口
+
+完了条件:
+
+- CLI経由でもcoreはdatabaseやTUIを暗黙に起動しない。
+- asset failureは既存APIと同じく構造化resultとして扱う。
+- `--format json`をCIとAI agentが安定して利用できる。
+
+### M10: Add local run-history commands
+
+OpenSpec change: `add-run-history-cli`
+
+SQLite adapterに明示的に保存した履歴を、Pythonコードを書かずに調べられるようにする。
+
+対象:
+
+- `runs list`、`runs show`、`runs compare`による一覧、詳細、差分表示
+- status、開始時刻、duration、task/partition結果、保存可能metadataの比較
+- schema migration errorと、保存されない情報の明確な診断
+
+完了条件:
+
+- raw output、例外object、partition keyを復元したように見せない。
+- SQLite adapterを使わない利用者に依存や副作用を増やさない。
+
+### M11: Stabilize the CLI for public use
+
+OpenSpec change: `stabilize-cli-public-api`
+
+CLIを公開利用できる契約として安定させる。
+
+対象:
+
+- `--help`、error message、exit code、JSON schemaの互換性方針
+- READMEの最短導入、review、CI利用例
+- wheelからのCLI smoke testと、core-only、TUI、SQLiteの組み合わせ検証
+- release notesとCLI migration policy
+
+完了条件:
+
+- core-only wheel環境で`kazeflow plan`と`kazeflow run`が動作する。
+- optional featureの有無による挙動が文書化・検証されている。
+
 ## Parallel execution model
 
 並列エージェント作業は、速さよりもownershipの明確さを優先する。
@@ -222,6 +331,29 @@ core integration後、次を並列化できる。
 - Persistence owner: SQLite adapterと専用tests
 
 `__init__.py`、`pyproject.toml`、`uv.lock`はconflict hotspotとして、各waveで単独ownerを置く。
+
+### Wave 4: CLI contracts and projections
+
+M7を仕様gateとする。M7のOpenSpecをarchiveするまで、CLI entry pointやJSON schemaを実装で固定しない。
+M8では次を並列に進められる。
+
+- CLI owner: `src/kazeflow/cli.py`とentry point解決
+- Projection owner: plan/resultのtext・JSON projectionと専用tests
+- Documentation owner: CLI guide、README、examples
+
+`pyproject.toml`のconsole-script定義と`src/kazeflow/__init__.py`は単独ownerとする。
+projectionが共有contractに触れる場合は、`flow.py`、`assets.py`のownerと先にinterfaceを合意する。
+
+### Wave 5: Reviewed execution and local history
+
+M8のplan contractを固定した後、M9のrun commandとM10のrun-history commandを進める。
+
+- Run CLI owner: confirmation、exit code、`--store`、integration tests
+- History owner: SQLite履歴のquery/formattingと専用tests
+- Verification owner: wheel smoke、core-only/TUI/SQLite組み合わせtests
+
+`src/kazeflow/cli.py`はM9とM10で共有するhotspotのため、同じwaveで1人だけが編集する。
+SQLite adapterの保存schemaを変更する場合も、migration ownerを単独で置く。
 
 ## OpenSpec workflow
 
