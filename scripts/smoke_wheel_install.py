@@ -74,6 +74,13 @@ plan_cli = subprocess.run(
     text=True,
 )
 assert json.loads(plan_cli.stdout)["targets"] == ["publish"]
+run_cli = subprocess.run(
+    [str(command), "run", str(flow_file), "--yes", "--format", "json"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+assert json.loads(run_cli.stdout)["status"] == "success"
 """
 
 TUI_PROGRAM = """

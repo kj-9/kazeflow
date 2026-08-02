@@ -1,14 +1,18 @@
-# CLI inspection
+# CLI usage
 
-The standard-library-only `kazeflow` command provides two inspection commands:
+The standard-library-only `kazeflow` command provides inspection and deliberate
+execution commands:
 
 ```bash
 kazeflow assets ENTRY
-kazeflow plan ENTRY [--target NAME] [--format json]
+kazeflow plan ENTRY [--target NAME ...] [--partition-key KEY ...] \
+    [--max-concurrency N] [--format text|json]
+kazeflow run ENTRY [--target NAME ...] [--partition-key KEY ...] \
+    [--max-concurrency N] [--yes] [--tui] [--store PATH] [--format text|json]
 ```
 
-They supplement the Python API. They do not run a flow, prompt for approval, show
-the optional Rich TUI, or save a SQLite run record.
+They supplement the Python API. `assets` and `plan` inspect only; `run` requires a
+separate, explicit decision before it invokes asset bodies.
 
 ## Define a script entry
 
@@ -39,11 +43,13 @@ kazeflow assets examples/flow.py
 kazeflow plan examples/flow.py
 ```
 
-An explicit entry can select a flow attribute instead:
+An explicit entry can select a flow attribute or a zero-argument factory that returns
+a `Flow`:
 
 ```bash
 kazeflow assets examples/flow.py:flow
 kazeflow plan package.module:flow
+kazeflow run package.module:make_flow --yes
 ```
 
 For a bare script, a module-level `flow` takes precedence as the default flow.
@@ -82,29 +88,86 @@ kazeflow plan examples/flow.py --target summarize
 kazeflow plan examples/flow.py --format json
 ```
 
+Use repeatable `--target` to select one or more targets. `--partition-key` (also
+available as `--partition`) supplies selected partition keys, and
+`--max-concurrency` supplies the execution concurrency value to plan. These options
+are also accepted by `run`, so its preflight and execution use the same resolved
+entry and selections within one invocation.
+
 The JSON projection is a review-oriented representation, not a serialization format
 for arbitrary Python values. In particular, it does not expose raw partition-key
 objects. Successful JSON output is written only to standard output, so diagnostics
 remain available on standard error.
 
+## Run after an explicit review
+
+`run` builds a pre-execution plan and writes its summary to standard error before it
+asks for confirmation or invokes an asset body. When both standard input and standard
+error are TTYs, it prompts `Proceed? [y/N]`; only `y` or `yes`, case-insensitively,
+starts the run. Any other response or EOF is a successful no-op: no asset, TUI, or
+store is initialized, and no `RunResult` is created.
+
+When either standard input or standard error is not a TTY, `run` does not prompt and
+requires `--yes`. This makes execution in CI and pipelines an explicit choice:
+
+```bash
+kazeflow run examples/flow.py --target summarize --yes
+```
+
+In text mode, a completed run writes a human-readable terminal result summary. With
+`--format json`, standard output contains exactly one portable, intentionally lossy
+`RunResult` record. The preflight, confirmation prompt, cancellation notice,
+progress presentation, and diagnostics use standard error, leaving JSON stdout safe
+for automation. Raw outputs, exception objects, and raw partition-key values are not
+included in that record.
+
+### Optional adapters
+
+The default execution path does not import Rich, create a database, or persist a run
+record. Both optional adapters require explicit selection after execution approval:
+
+```bash
+# Present execution events with the optional Rich extra.
+kazeflow run examples/flow.py --yes --tui
+
+# Save the terminal result to this explicit SQLite database path.
+kazeflow run examples/flow.py --yes --store runs.sqlite3
+```
+
+`--tui` lazily loads the optional Rich presentation before execution. `--store PATH`
+constructs the SQLite store only after a terminal result is available and saves the
+result before successful final output is emitted. If a requested adapter fails, the
+CLI reports that infrastructure failure and does not emit a successful final result;
+it takes precedence over an asset-failure status.
+
 ## Loading is not sandboxing
 
-`assets` and `plan` load the supplied entry as Python in order to discover its
-definitions. Consequently, top-level statements and imports run during loading and
-may have side effects. The commands never invoke a decorated asset function while
-listing assets or building a plan, but they cannot make loading untrusted Python
-safe. Review the script and its environment before supplying it to the CLI.
+All commands load the supplied entry as Python in order to discover its definitions.
+Consequently, top-level statements and imports run during loading and may have side
+effects. An explicit factory is also arbitrary user code and runs when selected. The
+CLI's inspection path does not itself invoke a decorated asset function; `run` does
+so only after its preflight and explicit execution decision. Factory code remains
+responsible for any behavior it performs. None of these commands makes loading
+untrusted Python safe. Review the script and its environment before supplying it to
+the CLI.
 
 ## Exit status and diagnostics
 
-Successful inspections exit with status `0`. Invalid command-line arguments or
-planning configuration exit with status `2`; entries that cannot be loaded or do not
-resolve to an inspectable definition exit with status `3`. Diagnostics are written to
-standard error. In JSON mode, failures do not produce a successful JSON document on
-standard output.
+| Status | Meaning |
+| --- | --- |
+| `0` | A successful inspection or terminal run, or a deliberate declined confirmation. |
+| `1` | A confirmed run reached a terminal result with an asset failure. |
+| `2` | Invalid command syntax or configuration, a missing non-interactive `--yes`, or an ambiguous discovered `run` target. |
+| `3` | The entry could not be loaded or resolved to an inspectable flow. |
+| `4` | CLI execution infrastructure or a requested TUI/store adapter failed. |
+
+Diagnostics always use standard error. In JSON mode, configuration, entry, and
+infrastructure failures produce no successful document on standard output. A selected
+adapter failure after a terminal asset failure still exits `4` and suppresses the
+final result document.
 
 ## Current scope
 
-This first CLI surface is inspection only. `kazeflow run`, interactive confirmation,
-Rich terminal rendering, and SQLite run-record persistence are not implemented as
-CLI commands. The core CLI has no mandatory third-party runtime dependency.
+The CLI does not add a scheduler, daemon, remote execution, cache, sandbox, or
+automatic approval. The core CLI has no mandatory third-party runtime dependency;
+Rich presentation and SQLite persistence remain explicit optional behavior.

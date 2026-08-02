@@ -122,10 +122,34 @@ kazeflow plan path/to/flow.py --format json
 `assets` and `plan` do not call asset functions. Loading a script is still ordinary
 Python execution, however, so its top-level statements and imports can have side
 effects. Treat a script entry as trusted code to load; the inspection commands are
-not a sandbox or a safety approval. The current CLI only inspects flows: `run`, Rich
-TUI integration, and SQLite record storage are not CLI features. See the
-[CLI guide](docs/cli.md) for entry forms, target selection, JSON output, and error
-handling.
+not a sandbox or a safety approval.
+
+## Deliberately run a reviewed script
+
+`kazeflow run` performs the same entry resolution and planning preflight, then shows
+its summary on standard error before an asset body can run. In an interactive
+terminal, confirm the prompt only after reviewing the selected targets, work order,
+partitions, and configuration. For CI, pipes, and other non-interactive uses, pass
+`--yes` explicitly:
+
+```bash
+# Review the preflight on stderr, then respond y or yes to execute.
+kazeflow run path/to/flow.py --target summarize
+
+# Non-interactive execution requires an explicit decision.
+kazeflow run path/to/flow.py --target summarize --yes
+
+# Keep stdout machine-readable; review and diagnostics remain on stderr.
+kazeflow run path/to/flow.py --yes --format json
+```
+
+Declining the prompt is a successful no-op: it does not invoke assets, initialize
+the optional TUI or SQLite store, or produce a run result. By default, `run` uses
+only the core execution path. Select `--tui` for the optional Rich presentation and
+`--store PATH` to persist the completed result to a caller-chosen SQLite database;
+neither adapter is imported or initialized unless explicitly requested. See the
+[CLI guide](docs/cli.md) for the complete command contract, including exit statuses
+and the loading trust boundary.
 
 For a partitioned flow with a failed and dependency-blocked attempt, see the
 [review workflow guide](docs/reviewable-flows.md) and its runnable

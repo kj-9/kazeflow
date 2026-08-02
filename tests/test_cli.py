@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import io
 import sys
 from pathlib import Path
 
 import pytest
 
+import kazeflow.cli as cli
 from kazeflow.cli import main
+from kazeflow.sqlite_store import SQLiteRunStore
 
 
 def _script(tmp_path: Path, name: str, source: str) -> Path:
@@ -21,6 +24,11 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, str,
     status = main(argv)
     captured = capsys.readouterr()
     return status, captured.out, captured.err
+
+
+class _TTY(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 def test_assets_and_plan_use_declared_flow_and_emit_json_only_to_stdout(
@@ -296,3 +304,280 @@ def inspectable():
     assert stderr == ""
     assert "kazeflow.tui" not in sys.modules
     assert "kazeflow.sqlite_store" not in sys.modules
+
+
+def test_run_prompts_on_a_tty_then_executes_only_after_yes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "ran.txt"
+    entry = _script(
+        tmp_path,
+        "approved.py",
+        f"""
+from pathlib import Path
+from kazeflow import asset
+
+marker = Path({str(marker)!r})
+
+@asset
+def publish():
+    marker.write_text('ran', encoding='utf-8')
+""",
+    )
+    stdin = _TTY("yes\n")
+    stderr = _TTY()
+    monkeypatch.setattr(cli.sys, "stdin", stdin)
+    monkeypatch.setattr(cli.sys, "stderr", stderr)
+
+    status = main(["run", str(entry)])
+    stdout = capsys.readouterr().out
+
+    assert status == 0
+    assert marker.read_text(encoding="utf-8") == "ran"
+    assert stdout.startswith("Run result:\n")
+    assert "Planned run:" in stderr.getvalue()
+    assert "Proceed? [y/N]" in stderr.getvalue()
+
+
+def test_run_decline_is_a_successful_no_op_without_adapter_initialization(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _script(
+        tmp_path,
+        "declined.py",
+        """
+from kazeflow import asset
+
+@asset
+def never_run():
+    raise AssertionError('asset body must not run')
+""",
+    )
+    stdin = _TTY("no\n")
+    stderr = _TTY()
+    monkeypatch.setattr(cli.sys, "stdin", stdin)
+    monkeypatch.setattr(cli.sys, "stderr", stderr)
+    monkeypatch.setattr(cli, "_execute", lambda *_args, **_kwargs: pytest.fail("run"))
+    monkeypatch.setattr(
+        cli, "_save_result", lambda *_args, **_kwargs: pytest.fail("store")
+    )
+
+    status = main(["run", str(entry), "--tui", "--store", str(tmp_path / "run.db")])
+    stdout = capsys.readouterr().out
+
+    assert status == 0
+    assert stdout == ""
+    assert not (tmp_path / "run.db").exists()
+    assert "run cancelled" in stderr.getvalue()
+
+
+def test_run_requires_yes_without_a_terminal_and_does_not_invoke_assets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "ran.txt"
+    entry = _script(
+        tmp_path,
+        "noninteractive.py",
+        f"""
+from pathlib import Path
+from kazeflow import asset
+
+marker = Path({str(marker)!r})
+
+@asset
+def never_run():
+    marker.write_text('ran', encoding='utf-8')
+""",
+    )
+
+    status, stdout, stderr = _run(capsys, ["run", str(entry), "--format", "json"])
+
+    assert status == 2
+    assert stdout == ""
+    assert not marker.exists()
+    assert "Planned run:" in stderr
+    assert "--yes is required" in stderr
+
+
+def test_run_yes_emits_one_portable_json_record_after_preflight(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "json_run.py",
+        """
+from kazeflow import asset
+
+@asset
+def publish():
+    return {'secret': 'raw output must not be serialized'}
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["run", str(entry), "--yes", "--format", "json"]
+    )
+
+    assert status == 0
+    record = json.loads(stdout)
+    assert record["status"] == "success"
+    assert "raw output must not be serialized" not in stdout
+    assert "Planned run:" in stderr
+    assert "Run result:" not in stderr
+
+
+def test_run_reports_asset_failure_as_completed_json_result(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "failed.py",
+        """
+from kazeflow import asset
+
+@asset
+def broken():
+    raise RuntimeError('expected failure')
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["run", str(entry), "--yes", "--format", "json"]
+    )
+
+    assert status == 1
+    assert json.loads(stdout)["status"] == "failed"
+    assert "Planned run:" in stderr
+
+
+def test_run_rejects_ambiguous_discovered_targets_without_invocation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "ran.txt"
+    entry = _script(
+        tmp_path,
+        "ambiguous.py",
+        f"""
+from pathlib import Path
+from kazeflow import asset
+
+marker = Path({str(marker)!r})
+
+@asset
+def alpha():
+    marker.write_text('alpha', encoding='utf-8')
+
+@asset
+def beta():
+    marker.write_text('beta', encoding='utf-8')
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["run", str(entry), "--yes", "--format", "json"]
+    )
+
+    assert status == 2
+    assert stdout == ""
+    assert not marker.exists()
+    assert "requires --target" in stderr
+
+
+def test_run_saves_requested_result_and_store_failure_takes_precedence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    success_entry = _script(
+        tmp_path,
+        "stored.py",
+        """
+from kazeflow import asset
+
+@asset
+def publish():
+    return 'stored'
+""",
+    )
+    database = tmp_path / "runs.db"
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "run",
+            str(success_entry),
+            "--yes",
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert status == 0
+    assert "Planned run:" in stderr
+    record = json.loads(stdout)
+    with SQLiteRunStore(database) as store:
+        assert store.load(record["run_id"]).record == record
+
+    failed_entry = _script(
+        tmp_path,
+        "store_precedence.py",
+        """
+from kazeflow import asset
+
+@asset
+def broken():
+    raise RuntimeError('asset failure')
+""",
+    )
+
+    def fail_save(*_args: object, **_kwargs: object) -> None:
+        raise cli._InfrastructureError("SQLite store failed: simulated")
+
+    monkeypatch.setattr(cli, "_save_result", fail_save)
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "run",
+            str(failed_entry),
+            "--yes",
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert status == 4
+    assert stdout == ""
+    assert "SQLite store failed: simulated" in stderr
+
+
+def test_run_unavailable_tui_fails_before_invoking_an_asset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "ran.txt"
+    entry = _script(
+        tmp_path,
+        "tui_missing.py",
+        f"""
+from pathlib import Path
+from kazeflow import asset
+
+marker = Path({str(marker)!r})
+
+@asset
+def publish():
+    marker.write_text('ran', encoding='utf-8')
+""",
+    )
+    monkeypatch.setitem(sys.modules, "rich", None)
+    monkeypatch.delitem(sys.modules, "rich.console", raising=False)
+
+    status, stdout, stderr = _run(
+        capsys, ["run", str(entry), "--yes", "--tui", "--format", "json"]
+    )
+
+    assert status == 4
+    assert stdout == ""
+    assert not marker.exists()
+    assert "TUI adapter failed" in stderr

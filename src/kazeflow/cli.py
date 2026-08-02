@@ -8,6 +8,7 @@ sandbox or an approval mechanism.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import importlib.util
 import json
@@ -15,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 from types import ModuleType
-from typing import Any, Sequence
+from typing import Any, Sequence, TextIO
 from uuid import uuid4
 
 from .assets import Asset, AssetRegistry, default_registry
@@ -37,6 +38,10 @@ class _EntryError(Exception):
     pass
 
 
+class _InfrastructureError(Exception):
+    pass
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise _UsageError(message)
@@ -46,6 +51,13 @@ class _Parser(argparse.ArgumentParser):
 class _LoadedEntry:
     flow: Flow | None
     assets: tuple[Asset, ...]
+
+
+@dataclass(frozen=True)
+class _SelectedRun:
+    flow: Flow
+    config: dict[str, Any] | None
+    plan: FlowPlan
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,6 +82,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--max-concurrency", type=int)
     plan.add_argument("--format", choices=("text", "json"), default="text")
+
+    run = commands.add_parser("run", help="review and deliberately execute a flow")
+    run.add_argument("entry", help="a Python file or module:attribute entry")
+    run.add_argument("--target", dest="targets", action="append", default=[])
+    run.add_argument(
+        "--partition-key", "--partition", dest="partition_keys", action="append"
+    )
+    run.add_argument("--max-concurrency", type=int)
+    run.add_argument("--format", choices=("text", "json"), default="text")
+    run.add_argument("--yes", action="store_true", help="approve execution")
+    run.add_argument("--tui", action="store_true", help="show optional Rich progress")
+    run.add_argument("--store", metavar="PATH", help="save the completed run to SQLite")
     return parser
 
 
@@ -82,15 +106,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "assets":
             loaded = _load_entry(args.entry)
             _emit_assets(loaded, args.format)
-        else:
+        elif args.command == "plan":
             loaded = _load_entry(args.entry)
             _emit_plan(loaded, args)
+        else:
+            loaded = _load_entry(args.entry)
+            return _run_selected(loaded, args)
     except _UsageError as error:
         _diagnostic(str(error))
         return EXIT_USAGE
     except _EntryError as error:
         _diagnostic(str(error))
         return EXIT_ENTRY
+    except _InfrastructureError as error:
+        _diagnostic(str(error))
+        return EXIT_INFRASTRUCTURE
     except (TypeError, ValueError) as error:
         _diagnostic(str(error))
         return EXIT_USAGE
@@ -250,10 +280,25 @@ def _emit_assets(loaded: _LoadedEntry, output_format: str) -> None:
 
 
 def _emit_plan(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
+    selected = _select_run(loaded, args)
+    if args.format == "json":
+        _json_output(_plan_record(selected.plan))
+        return
+    _text_plan(selected.plan)
+
+
+def _select_run(
+    loaded: _LoadedEntry, args: argparse.Namespace, *, require_one_target: bool = False
+) -> _SelectedRun:
+    """Resolve the flow, normalized options, and a side-effect-free preflight plan."""
     targets = list(args.targets)
     if loaded.flow is None:
         if not targets:
             targets = list(_terminal_assets(loaded.assets))
+            if require_one_target and len(targets) != 1:
+                raise _UsageError(
+                    "run requires --target when discovered terminal targets are ambiguous"
+                )
         flow = Flow(targets, registry=_registry_for(loaded.assets))
     else:
         flow = (
@@ -265,10 +310,79 @@ def _emit_plan(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
     if args.partition_keys is not None:
         config["partition_keys"] = args.partition_keys
     plan = flow.plan(config or None)
-    if args.format == "json":
-        _json_output(_plan_record(plan))
+    return _SelectedRun(flow, config or None, plan)
+
+
+def _run_selected(loaded: _LoadedEntry, args: argparse.Namespace) -> int:
+    selected = _select_run(loaded, args, require_one_target=True)
+    _text_plan(selected.plan, file=sys.stderr, heading="Planned run:")
+
+    if not _approved(args.yes):
+        return EXIT_SUCCESS
+
+    result = _execute(selected, use_tui=args.tui)
+    _save_result(result, args.store)
+    _emit_result(result, args.format)
+    return EXIT_SUCCESS if result.status.value == "success" else 1
+
+
+def _approved(approved_by_flag: bool) -> bool:
+    if approved_by_flag:
+        return True
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        raise _UsageError("--yes is required when stdin or stderr is not a terminal")
+    print("Proceed? [y/N] ", end="", file=sys.stderr, flush=True)
+    response = sys.stdin.readline()
+    if response.strip().lower() in {"y", "yes"}:
+        return True
+    _diagnostic("run cancelled")
+    return False
+
+
+def _execute(selected: _SelectedRun, *, use_tui: bool) -> Any:
+    """Run only after approval, keeping the optional presenter fully lazy."""
+    if not use_tui:
+        try:
+            return asyncio.run(selected.flow.run_async(selected.config))
+        except Exception as error:
+            raise _InfrastructureError(f"execution failed: {error}") from error
+
+    try:
+        from rich.console import Console
+
+        from .tui import FlowTUIRenderer
+
+        renderer = FlowTUIRenderer(
+            total_assets=len(selected.plan.tasks), console=Console(stderr=True)
+        )
+        with renderer:
+            return asyncio.run(
+                selected.flow.run_async(selected.config, event_consumer=renderer)
+            )
+    except Exception as error:
+        raise _InfrastructureError(f"TUI adapter failed: {error}") from error
+
+
+def _save_result(result: Any, path: str | None) -> None:
+    if path is None:
         return
-    _text_plan(plan)
+    try:
+        from .sqlite_store import SQLiteRunStore
+
+        with SQLiteRunStore(path) as store:
+            store.save(result)
+    except Exception as error:
+        raise _InfrastructureError(f"SQLite store failed: {error}") from error
+
+
+def _emit_result(result: Any, output_format: str) -> None:
+    if output_format == "json":
+        _json_output(result.to_record())
+        return
+    print("Run result:")
+    print(f"- run_id: {result.run_id}")
+    print(f"- status: {result.status.value}")
+    print(f"- tasks: {len(result.tasks)}")
 
 
 def _registry_for(assets: tuple[Asset, ...]) -> AssetRegistry:
@@ -321,19 +435,26 @@ def _plan_record(plan: FlowPlan) -> dict[str, Any]:
     }
 
 
-def _text_plan(plan: FlowPlan) -> None:
-    print("Targets:")
+def _text_plan(
+    plan: FlowPlan, *, file: TextIO | None = None, heading: str | None = None
+) -> None:
+    stream = file if file is not None else sys.stdout
+    if heading is not None:
+        print(heading, file=stream)
+    print("Targets:", file=stream)
     for target in plan.targets:
-        print(f"- {target}")
-    print("Configuration:")
+        print(f"- {target}", file=stream)
+    print("Configuration:", file=stream)
     print(
-        f"- max_concurrency: {plan.config.max_concurrency if plan.config.max_concurrency is not None else 'default'}"
+        f"- max_concurrency: {plan.config.max_concurrency if plan.config.max_concurrency is not None else 'default'}",
+        file=stream,
     )
     count = plan.config.partition_keys
     print(
-        f"- partition_keys: {'not supplied' if count is None else f'{len(count)} selected'}"
+        f"- partition_keys: {'not supplied' if count is None else f'{len(count)} selected'}",
+        file=stream,
     )
-    print("Tasks (dependency-first):")
+    print("Tasks (dependency-first):", file=stream)
     for task in plan.tasks:
         dependencies = ", ".join(task.dependencies) or "none"
         partitions = (
@@ -341,7 +462,10 @@ def _text_plan(plan: FlowPlan) -> None:
             if task.partition_keys is None
             else f"{len(task.partition_keys)} selected"
         )
-        print(f"- {task.name} (dependencies: {dependencies}; partitions: {partitions})")
+        print(
+            f"- {task.name} (dependencies: {dependencies}; partitions: {partitions})",
+            file=stream,
+        )
 
 
 def _json_output(value: dict[str, Any]) -> None:
