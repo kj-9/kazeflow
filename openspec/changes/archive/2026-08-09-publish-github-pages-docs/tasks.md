@@ -26,7 +26,7 @@
 - [x] 3.2 Run the applicable documentation validation, `make test`, `make
   ci-check`, `openspec validate publish-github-pages-docs --strict`, and `git diff
   --check`.
-- [ ] 3.3 Enable GitHub Pages with GitHub Actions as the source, deploy from
+- [x] 3.3 Enable GitHub Pages with GitHub Actions as the source, deploy from
   `main`, and manually verify the published navigation and first-flow examples.
-- [ ] 3.4 Sync the approved delta spec into `openspec/specs/`, verify the change,
+- [x] 3.4 Sync the approved delta spec into `openspec/specs/`, verify the change,
   and archive it serially after the deployed site is confirmed.
