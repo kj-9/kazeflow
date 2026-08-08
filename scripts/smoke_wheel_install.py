@@ -81,6 +81,23 @@ run_cli = subprocess.run(
     text=True,
 )
 assert json.loads(run_cli.stdout)["status"] == "success"
+history_directory = Path(".kazeflow")
+history_directory.mkdir()
+history_store = history_directory / "runs.sqlite3"
+stored_run = subprocess.run(
+    [str(command), "run", str(flow_file), "--yes", "--store", str(history_store), "--format", "json"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+stored_run_id = json.loads(stored_run.stdout)["run_id"]
+history = subprocess.run(
+    [str(command), "runs", "show", stored_run_id, "--format", "json"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+assert json.loads(history.stdout)["run_id"] == stored_run_id
 """
 
 TUI_PROGRAM = """

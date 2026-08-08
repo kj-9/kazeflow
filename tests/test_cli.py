@@ -581,3 +581,149 @@ def publish():
     assert stdout == ""
     assert not marker.exists()
     assert "TUI adapter failed" in stderr
+
+
+def test_runs_list_uses_project_default_store_and_limits_summaries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _script(
+        tmp_path,
+        "stored_default.py",
+        """
+from kazeflow import asset
+
+@asset
+def publish():
+    return 'private output'
+""",
+    )
+    store_path = tmp_path / ".kazeflow" / "runs.sqlite3"
+    store_path.parent.mkdir()
+    status, stdout, _stderr = _run(
+        capsys,
+        ["run", str(entry), "--yes", "--store", str(store_path), "--format", "json"],
+    )
+    assert status == 0
+    run_id = json.loads(stdout)["run_id"]
+
+    monkeypatch.chdir(tmp_path)
+    status, stdout, stderr = _run(
+        capsys, ["runs", "list", "--limit", "1", "--format", "json"]
+    )
+
+    assert status == 0
+    assert stderr == ""
+    history = json.loads(stdout)
+    assert history["schema_version"] == 1
+    assert history["runs"][0]["run_id"] == run_id
+    assert history["runs"][0]["schema_version"] == 1
+    assert history["runs"][0]["status"] == "success"
+    assert history["runs"][0]["saved_at"].endswith("+00:00")
+
+
+def test_runs_show_and_compare_preserve_portable_boundaries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    success = _script(
+        tmp_path,
+        "history_success.py",
+        """
+from kazeflow import asset
+
+@asset
+def publish():
+    return 'private output'
+""",
+    )
+    failure = _script(
+        tmp_path,
+        "history_failure.py",
+        """
+from kazeflow import asset
+
+@asset
+def publish():
+    raise RuntimeError('private failure details')
+""",
+    )
+    database = tmp_path / "history.sqlite3"
+    status, stdout, _stderr = _run(
+        capsys,
+        ["run", str(success), "--yes", "--store", str(database), "--format", "json"],
+    )
+    assert status == 0
+    success_id = json.loads(stdout)["run_id"]
+    status, stdout, _stderr = _run(
+        capsys,
+        ["run", str(failure), "--yes", "--store", str(database), "--format", "json"],
+    )
+    assert status == 1
+    failure_id = json.loads(stdout)["run_id"]
+
+    status, stdout, stderr = _run(
+        capsys,
+        ["runs", "show", success_id, "--store", str(database), "--format", "json"],
+    )
+    assert status == 0
+    assert stderr == ""
+    shown = json.loads(stdout)
+    assert shown["run_id"] == success_id
+    assert shown["record"]["tasks"][0]["attempts"][0]["attempt"]["partition"] == {
+        "present": False
+    }
+    assert "private output" not in stdout
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "runs",
+            "compare",
+            failure_id,
+            success_id,
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+    assert status == 0
+    assert stderr == ""
+    compared = json.loads(stdout)
+    assert compared["left"]["run_id"] == failure_id
+    assert compared["right"]["run_id"] == success_id
+    task = compared["comparison"]["tasks"][0]
+    assert task["task_name"] == "publish"
+    assert task["left"]["failure_exception_types"] == ["RuntimeError"]
+    assert "private failure details" not in json.dumps(compared["comparison"])
+
+
+def test_runs_history_errors_do_not_create_a_store_or_emit_success_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    default_store = tmp_path / ".kazeflow" / "runs.sqlite3"
+
+    status, stdout, stderr = _run(capsys, ["runs", "list", "--format", "json"])
+    assert status == 4
+    assert stdout == ""
+    assert stderr
+    assert not default_store.exists()
+
+    database = tmp_path / "empty.sqlite3"
+    with SQLiteRunStore(database):
+        pass
+    status, stdout, stderr = _run(
+        capsys,
+        ["runs", "show", "missing", "--store", str(database), "--format", "json"],
+    )
+    assert status == 2
+    assert stdout == ""
+    assert "run not found: missing" in stderr
+
+    status, stdout, stderr = _run(
+        capsys,
+        ["runs", "list", "--store", str(database), "--limit", "-1", "--format", "json"],
+    )
+    assert status == 2
+    assert stdout == ""
+    assert "--limit" in stderr

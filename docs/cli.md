@@ -9,6 +9,9 @@ kazeflow plan ENTRY [--target NAME ...] [--partition-key KEY ...] \
     [--max-concurrency N] [--format text|json]
 kazeflow run ENTRY [--target NAME ...] [--partition-key KEY ...] \
     [--max-concurrency N] [--yes] [--tui] [--store PATH] [--format text|json]
+kazeflow runs list [--store PATH] [--limit N] [--format text|json]
+kazeflow runs show RUN_ID [--store PATH] [--format text|json]
+kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID [--store PATH] [--format text|json]
 ```
 
 They supplement the Python API. `assets` and `plan` inspect only; `run` requires a
@@ -139,6 +142,33 @@ constructs the SQLite store only after a terminal result is available and saves 
 result before successful final output is emitted. If a requested adapter fails, the
 CLI reports that infrastructure failure and does not emit a successful final result;
 it takes precedence over an asset-failure status.
+
+## Inspect local run history
+
+Run history stays local and is deliberately separate from core execution. History
+commands read `./.kazeflow/runs.sqlite3`, relative to the directory where the command
+is invoked, unless `--store PATH` selects another existing store. They never create,
+initialize, migrate, or write a database. A missing default store is therefore an
+infrastructure error rather than an empty history.
+
+Save a run explicitly, then inspect it without writing Python:
+
+```bash
+mkdir -p .kazeflow
+kazeflow run examples/flow.py --yes --store .kazeflow/runs.sqlite3
+
+kazeflow runs list
+kazeflow runs show RUN_ID --format json
+kazeflow runs compare RUN_A RUN_B
+```
+
+`list` is ordered by saved time and then run ID; `--limit N` keeps the first `N`
+entries. `show` returns the stored portable envelope. `compare` preserves the
+left/right IDs supplied by the caller and compares run and task aggregates only.
+It does not attempt to identify individual partitions, because partition keys are
+not stored. All successful JSON modes write exactly one document to standard output.
+Unknown run IDs and invalid history arguments exit `2`; unreadable, malformed, or
+missing stores exit `4` with diagnostics on standard error.
 
 ## Loading is not sandboxing
 

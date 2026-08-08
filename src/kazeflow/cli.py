@@ -28,6 +28,7 @@ EXIT_SUCCESS = 0
 EXIT_USAGE = 2
 EXIT_ENTRY = 3
 EXIT_INFRASTRUCTURE = 4
+_DEFAULT_HISTORY_STORE = Path(".kazeflow") / "runs.sqlite3"
 
 
 class _UsageError(Exception):
@@ -94,6 +95,24 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--yes", action="store_true", help="approve execution")
     run.add_argument("--tui", action="store_true", help="show optional Rich progress")
     run.add_argument("--store", metavar="PATH", help="save the completed run to SQLite")
+
+    runs = commands.add_parser("runs", help="inspect saved local run history")
+    history = runs.add_subparsers(dest="history_command", required=True)
+    list_runs = history.add_parser("list", help="list saved run summaries")
+    list_runs.add_argument("--store", metavar="PATH")
+    list_runs.add_argument("--limit", type=int)
+    list_runs.add_argument("--format", choices=("text", "json"), default="text")
+    show_run = history.add_parser("show", help="show one saved portable record")
+    show_run.add_argument("run_id")
+    show_run.add_argument("--store", metavar="PATH")
+    show_run.add_argument("--format", choices=("text", "json"), default="text")
+    compare_runs = history.add_parser(
+        "compare", help="compare two saved portable records"
+    )
+    compare_runs.add_argument("left_run_id")
+    compare_runs.add_argument("right_run_id")
+    compare_runs.add_argument("--store", metavar="PATH")
+    compare_runs.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
@@ -102,6 +121,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     try:
         args = parser.parse_args(argv)
+        if args.command == "runs":
+            return _run_history(args)
         _validate_entry_syntax(args.entry)
         if args.command == "assets":
             loaded = _load_entry(args.entry)
@@ -383,6 +404,198 @@ def _emit_result(result: Any, output_format: str) -> None:
     print(f"- run_id: {result.run_id}")
     print(f"- status: {result.status.value}")
     print(f"- tasks: {len(result.tasks)}")
+
+
+def _run_history(args: argparse.Namespace) -> int:
+    """Read a caller-owned history store without creating or changing it."""
+    if args.history_command == "list" and args.limit is not None and args.limit < 0:
+        raise _UsageError("--limit must be a non-negative integer")
+    if args.history_command == "compare" and args.left_run_id == args.right_run_id:
+        raise _UsageError("compare requires two distinct run IDs")
+
+    path = Path(args.store) if args.store is not None else _DEFAULT_HISTORY_STORE
+    try:
+        if not path.is_file():
+            raise _InfrastructureError(f"history store is not an existing file: {path}")
+    except OSError as error:
+        raise _InfrastructureError(
+            f"could not inspect history store {path}: {error}"
+        ) from error
+
+    try:
+        from .sqlite_store import SQLiteRunStore
+
+        with SQLiteRunStore(path) as store:
+            if args.history_command == "list":
+                _emit_history_list(store.list_runs(limit=args.limit), args.format)
+            elif args.history_command == "show":
+                _emit_history_show(
+                    store.load(args.run_id), store.schema_version, args.format
+                )
+            else:
+                left = store.load(args.left_run_id)
+                right = store.load(args.right_run_id)
+                _emit_history_compare(left, right, store.schema_version, args.format)
+    except KeyError as error:
+        raise _UsageError(f"run not found: {error.args[0]}") from error
+    except _UsageError:
+        raise
+    except _InfrastructureError:
+        raise
+    except Exception as error:
+        raise _InfrastructureError(
+            f"could not read history store {path}: {error}"
+        ) from error
+    return EXIT_SUCCESS
+
+
+def _history_summary(summary: Any) -> dict[str, Any]:
+    return {
+        "run_id": summary.run_id,
+        "schema_version": summary.schema_version,
+        "status": summary.status,
+        "saved_at": summary.saved_at.isoformat(),
+    }
+
+
+def _history_envelope(stored: Any, store_schema_version: int) -> dict[str, Any]:
+    return {
+        "run_id": stored.run_id,
+        "schema_version": stored.schema_version,
+        "status": stored.status,
+        "saved_at": stored.saved_at.isoformat(),
+        "store_schema_version": store_schema_version,
+        "record": stored.record,
+    }
+
+
+def _emit_history_list(summaries: Sequence[Any], output_format: str) -> None:
+    records = [_history_summary(summary) for summary in summaries]
+    if output_format == "json":
+        _json_output({"schema_version": 1, "runs": records})
+        return
+    if not records:
+        print("No stored runs.")
+        return
+    print("Stored runs:")
+    for record in records:
+        print(
+            f"- {record['run_id']} ({record['status']}; saved_at: {record['saved_at']}; "
+            f"schema: {record['schema_version']})"
+        )
+
+
+def _emit_history_show(
+    stored: Any, store_schema_version: int, output_format: str
+) -> None:
+    envelope = _history_envelope(stored, store_schema_version)
+    if output_format == "json":
+        _json_output(envelope)
+        return
+    print("Stored run:")
+    print(f"- run_id: {envelope['run_id']}")
+    print(f"- status: {envelope['status']}")
+    print(f"- saved_at: {envelope['saved_at']}")
+    print("Portable record:")
+    print(json.dumps(envelope["record"], sort_keys=True, indent=2))
+
+
+def _task_history_summary(task: dict[str, Any]) -> dict[str, Any]:
+    attempts = task["attempts"]
+    status_counts: dict[str, int] = {}
+    failure_types: set[str] = set()
+    partitioned_attempt_count = 0
+    for attempt in attempts:
+        status = attempt["status"]
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if attempt["attempt"]["partition"]["present"]:
+            partitioned_attempt_count += 1
+        failure = attempt["failure"]
+        if failure is not None:
+            failure_types.add(failure["exception_type"])
+    return {
+        "is_partitioned": task["is_partitioned"],
+        "status": task["status"],
+        "reason": task["reason"],
+        "attempt_count": len(attempts),
+        "partitioned_attempt_count": partitioned_attempt_count,
+        "attempt_status_counts": dict(sorted(status_counts.items())),
+        "failure_present": bool(failure_types),
+        "failure_exception_types": sorted(failure_types),
+    }
+
+
+def _history_comparison(left: Any, right: Any) -> dict[str, Any]:
+    left_record = left.record
+    right_record = right.record
+    left_tasks = {
+        task["task"]["task_name"]: _task_history_summary(task)
+        for task in left_record["tasks"]
+    }
+    right_tasks = {
+        task["task"]["task_name"]: _task_history_summary(task)
+        for task in right_record["tasks"]
+    }
+    task_comparisons = []
+    for name in sorted(set(left_tasks) | set(right_tasks)):
+        left_task = left_tasks.get(name)
+        right_task = right_tasks.get(name)
+        task_comparisons.append(
+            {
+                "task_name": name,
+                "left": left_task,
+                "right": right_task,
+                "changed": left_task != right_task,
+            }
+        )
+    return {
+        "status_changed": left_record["status"] != right_record["status"],
+        "duration_seconds_delta": (
+            right_record["duration_seconds"] - left_record["duration_seconds"]
+        ),
+        "task_count_delta": len(right_record["tasks"]) - len(left_record["tasks"]),
+        "tasks": task_comparisons,
+    }
+
+
+def _emit_history_compare(
+    left: Any, right: Any, store_schema_version: int, output_format: str
+) -> None:
+    record = {
+        "schema_version": 1,
+        "left": _history_envelope(left, store_schema_version),
+        "right": _history_envelope(right, store_schema_version),
+        "comparison": _history_comparison(left, right),
+    }
+    if output_format == "json":
+        _json_output(record)
+        return
+    print("Run comparison:")
+    print(f"- left: {left.run_id} ({left.status})")
+    print(f"- right: {right.run_id} ({right.status})")
+    print(f"- status_changed: {record['comparison']['status_changed']}")
+    print(f"- duration_seconds_delta: {record['comparison']['duration_seconds_delta']}")
+    print("Task comparison:")
+    for task in record["comparison"]["tasks"]:
+        print(f"- {task['task_name']} (changed: {task['changed']})")
+        print(f"  left: {_text_task_history_summary(task['left'])}")
+        print(f"  right: {_text_task_history_summary(task['right'])}")
+
+
+def _text_task_history_summary(summary: dict[str, Any] | None) -> str:
+    if summary is None:
+        return "absent"
+    counts = ", ".join(
+        f"{status}={count}"
+        for status, count in summary["attempt_status_counts"].items()
+    )
+    failures = ", ".join(summary["failure_exception_types"]) or "none"
+    return (
+        f"status={summary['status']}; reason={summary['reason']}; "
+        f"partitioned={summary['is_partitioned']}; "
+        f"partitioned_attempts={summary['partitioned_attempt_count']}; "
+        f"attempts={summary['attempt_count']} ({counts}); failures={failures}"
+    )
 
 
 def _registry_for(assets: tuple[Asset, ...]) -> AssetRegistry:

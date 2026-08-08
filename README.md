@@ -151,6 +151,21 @@ neither adapter is imported or initialized unless explicitly requested. See the
 [CLI guide](docs/cli.md) for the complete command contract, including exit statuses
 and the loading trust boundary.
 
+Saved records can be inspected from the CLI. History commands use the existing
+project-local `.kazeflow/runs.sqlite3` by default and never create it implicitly:
+
+```bash
+mkdir -p .kazeflow
+kazeflow run path/to/flow.py --yes --store .kazeflow/runs.sqlite3
+kazeflow runs list
+kazeflow runs show RUN_ID
+kazeflow runs compare RUN_A RUN_B --format json
+```
+
+Use `--store PATH` with a history command to read another existing database. The
+stored records and comparisons remain deliberately lossy: raw outputs, exception
+objects, and partition keys are not exposed.
+
 For a partitioned flow with a failed and dependency-blocked attempt, see the
 [review workflow guide](docs/reviewable-flows.md) and its runnable
 [core-only example](examples/review_flow.py).
