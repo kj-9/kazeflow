@@ -11,4 +11,4 @@
 
 ## 3. Integration and archive
 
-- [ ] 3.1 Review and archive serially with M7--M9 after their shared CLI contracts are synced.
+- [x] 3.1 Review and archive serially with M7--M9 after their shared CLI contracts are synced.

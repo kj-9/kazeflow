@@ -19,4 +19,4 @@
 ## 4. Integration and archive
 
 - [x] 4.1 Have the single integration owner reconcile shared package metadata and documentation changes, then review the complete diff.
-- [ ] 4.2 Sync the accepted `flow-plan-cli` delta into living specs and archive this change only after implementation and verification complete.
+- [x] 4.2 Sync the accepted `flow-plan-cli` delta into living specs and archive this change only after implementation and verification complete.

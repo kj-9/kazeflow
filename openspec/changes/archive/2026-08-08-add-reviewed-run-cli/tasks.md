@@ -16,4 +16,4 @@
 
 ## 4. Integration and archive
 
-- [ ] 4.1 Sync/archival remains serial with the active CLI contract and M8 changes; archive only once their living specifications can be coherent.
+- [x] 4.1 Sync/archival remains serial with the active CLI contract and M8 changes; archive only once their living specifications can be coherent.

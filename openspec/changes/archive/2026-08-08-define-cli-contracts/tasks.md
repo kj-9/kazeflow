@@ -8,11 +8,11 @@
 
 ## 2. Implementation planning
 
-- [ ] 2.1 Create the M8 `add-flow-plan-cli` change with asset discovery, concrete file/module loading behavior, plan projection fields, and CLI integration tests.
-- [ ] 2.2 Create the M9 `add-reviewed-run-cli` change with confirmation UX, execution output, optional TUI, explicit SQLite persistence, and failure-path tests.
-- [ ] 2.3 Create the M10 `add-run-history-cli` change after M9 fixes the persisted-run command boundary.
+- [x] 2.1 Create the M8 `add-flow-plan-cli` change with asset discovery, concrete file/module loading behavior, plan projection fields, and CLI integration tests.
+- [x] 2.2 Create the M9 `add-reviewed-run-cli` change with confirmation UX, execution output, optional TUI, explicit SQLite persistence, and failure-path tests.
+- [x] 2.3 Create the M10 `add-run-history-cli` change after M9 fixes the persisted-run command boundary.
 
 ## 3. Validation
 
 - [x] 3.1 Validate this change with `openspec validate define-cli-contracts --strict`.
-- [ ] 3.2 Before archiving, verify M8--M10 proposals preserve all requirements in `flow-cli-contract`.
+- [x] 3.2 Before archiving, verify M8--M10 proposals preserve all requirements in `flow-cli-contract`.
