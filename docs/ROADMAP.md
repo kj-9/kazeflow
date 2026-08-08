@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M6 Complete; M7–M11 Proposed
+> Status: M0–M10 Complete; M11–M12 Proposed
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -293,6 +293,29 @@ CLIを公開利用できる契約として安定させる。
 - core-only wheel環境で`kazeflow plan`と`kazeflow run`が動作する。
 - optional featureの有無による挙動が文書化・検証されている。
 
+### M12: Make execution plans legible
+
+OpenSpec change: `add-plan-graph-rendering`
+
+`plan`を、実行順を列挙するだけでなく、依存関係の形まで一度に判断できる
+人間向けのreview画面へ育てる。これは静的解析や安全性の保証ではなく、解決済みの
+`FlowPlan`を読みやすく投影するための機能である。
+
+対象:
+
+- default text outputでの簡潔なplan summaryと、dependency-firstのASCII DAG表示
+- 分岐、合流、複数target、partitioned taskを曖昧にしない決定的な表現
+- `--format mermaid`と`--format dot`による、外部の可視化ツールへ渡せるDAG投影
+- 詳細なtask/partition/config情報を必要時だけ表示する`--verbose`などのUX設計
+- JSON outputの既存schemaとstdout/stderr境界を維持する互換性方針
+
+完了条件:
+
+- 同じ解決済みplanから常に同じtext、Mermaid、DOT表現が得られる。
+- text outputだけでtarget、依存関係、実行順、partitionの有無を判断できる。
+- Graphviz、Richその他のthird-party dependencyをcore CLIへ追加しない。
+- graph表現のtestsと、既存JSON consumerを壊さない互換性testsがある。
+
 ## Parallel execution model
 
 並列エージェント作業は、速さよりもownershipの明確さを優先する。
@@ -354,6 +377,17 @@ M8のplan contractを固定した後、M9のrun commandとM10のrun-history comm
 
 `src/kazeflow/cli.py`はM9とM10で共有するhotspotのため、同じwaveで1人だけが編集する。
 SQLite adapterの保存schemaを変更する場合も、migration ownerを単独で置く。
+
+### Wave 6: Stable, legible CLI
+
+M11で公開CLIの互換性方針を固定した後、M12でplan projectionを改善する。
+
+- Plan rendering owner: `src/kazeflow/cli.py`のtext、Mermaid、DOT projection
+- Test owner: graph shape、deterministic order、JSON compatibilityの専用tests
+- Documentation owner: README、CLI guide、Graphviz/Mermaid利用例
+
+`src/kazeflow/cli.py`はshared hotspotのため、renderer実装は単独ownerが担当する。
+JSON schemaを変更する場合はM11のpublic compatibility policyを先に更新する。
 
 ## OpenSpec workflow
 
