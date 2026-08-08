@@ -1,5 +1,9 @@
 # CLI usage
 
+For an ordered installation-to-history walkthrough, start at the
+[kazeflow documentation site](https://kj-9.github.io/kazeflow/). This guide is the
+detailed command reference.
+
 The standard-library-only `kazeflow` command provides inspection and deliberate
 execution commands:
 

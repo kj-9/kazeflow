@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M12 Complete
+> Status: M0–M12 Complete; M13 in progress
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -56,6 +56,25 @@ sliceを選んでreviewしてから再実行する」ための機能として、
 - text run outputだけでtaskごとのterminal outcomeをreviewできる。
 - JSON recordとexit statusの既存契約を変更しない。
 - 新規利用者がscript、plan、selected partition run、result/history inspectionまで辿れる。
+
+### M13: Publish task-oriented user documentation
+
+OpenSpec change: `publish-github-pages-docs`
+
+既存のrepository Markdownを正本として残しつつ、初めて利用する人が導入から最初のreviewed
+run、Partition、run historyまで迷わず進めるGitHub Pagesを公開する。
+
+対象:
+
+- 静的なlanding page、getting-started、CLI/graph、Partition、result/historyの導線
+- GitHub ActionsによるPR時の静的site検証と`main`からのPages deployment
+- Python entryのimport副作用とasset body未実行保証を区別するtrust boundaryの明示
+
+完了条件:
+
+- Python runtime dependencyやpackage behaviorを追加・変更しない。
+- 公開siteだけで最初のscript、plan、明示runの手順を辿れる。
+- GitHub Pagesの公開workflowがrepository内で再現可能に定義されている。
 
 ## Next direction: a reviewable CLI
 

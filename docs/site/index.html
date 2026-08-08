@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A small, reviewable task-flow library for ordinary Python scripts.">
+    <title>kazeflow — Reviewable Python task flows</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header><div class="shell topbar">
+      <a class="brand" href="index.html">kaze<span>flow</span></a>
+      <nav aria-label="Primary navigation">
+        <a aria-current="page" href="index.html">Overview</a>
+        <a href="getting-started.html">Get started</a>
+        <a href="cli.html">CLI &amp; graphs</a>
+        <a href="partitions.html">Partitions</a>
+        <a href="results.html">Results &amp; history</a>
+      </nav>
+    </div></header>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">A review layer for normal Python</div>
+        <h1>Make a growing script understandable before you run it.</h1>
+        <p class="lede">kazeflow turns ordinary Python functions into a small, inspectable flow. Review the dependency graph, explicitly approve execution, and keep a useful record of what happened—without a service, daemon, or required runtime dependency.</p>
+        <div class="actions"><a class="button" href="getting-started.html">Run your first flow</a><a class="button secondary" href="https://github.com/kj-9/kazeflow">View on GitHub</a></div>
+      </section>
+      <section class="grid" aria-label="Documentation paths">
+        <article class="card"><h3>Start in one file</h3><p>Install, declare <code>flow</code>, plan it, and deliberately run it.</p><a href="getting-started.html">Getting started →</a></article>
+        <article class="card"><h3>See the work first</h3><p>Use text, Mermaid, or DOT to inspect targets and dependencies.</p><a href="cli.html">CLI and graph output →</a></article>
+        <article class="card"><h3>Rerun exactly one slice</h3><p>Select partitions by date, region, or another script-defined key.</p><a href="partitions.html">Partition guide →</a></article>
+      </section>
+      <section>
+        <h2>What kazeflow is for</h2>
+        <p>Start with a script. When it becomes several dependent steps, keep the functions plain Python and add just enough structure to see the work order, choose the target, and inspect the outcome. kazeflow is intentionally not a scheduler, remote worker system, database-backed platform, or sandbox.</p>
+        <div class="callout"><strong>Trust boundary.</strong><p>A CLI command loads your Python entry, and importing a module can execute its top-level code. <code>plan</code> does not invoke asset bodies after the entry is loaded; it does not make an untrusted script safe. Read and trust the source before loading it.</p></div>
+      </section>
+    </main>
+    <footer><div class="shell"><p>kazeflow is a zero-dependency-core Python library. <a href="https://github.com/kj-9/kazeflow/blob/main/README.md">Repository README</a> · <a href="https://github.com/kj-9/kazeflow/blob/main/docs/GOAL.md">Project goals</a></p></div></footer>
+  </body>
+</html>

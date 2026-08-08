@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Get started — kazeflow</title><link rel="stylesheet" href="styles.css"></head>
+<body><header><div class="shell topbar"><a class="brand" href="index.html">kaze<span>flow</span></a><nav aria-label="Primary navigation"><a href="index.html">Overview</a><a aria-current="page" href="getting-started.html">Get started</a><a href="cli.html">CLI &amp; graphs</a><a href="partitions.html">Partitions</a><a href="results.html">Results &amp; history</a></nav></div></header>
+<main class="shell"><div class="eyebrow">First reviewed run</div><h1>From one script to a deliberate run.</h1><p class="lede">The normal path is: write a flow, inspect it, decide to run it, then review the result.</p>
+<section class="step"><b>1</b><div><h2>Install</h2><p>The core has no required runtime dependency.</p><pre><code>pip install kazeflow
+pip install "kazeflow[tui]"  # optional Rich progress display</code></pre></div></section>
+<section class="step"><b>2</b><div><h2>Declare a flow in a Python file</h2><p>Assets are ordinary functions. Export a module-level <code>flow</code> to name the default target.</p><pre><code># daily.py
+from kazeflow import Flow, asset
+
+@asset
+def fetch() -&gt; str:
+    return "report input"
+
+@asset
+def publish(fetch: str) -&gt; None:
+    print(fetch)
+
+flow = Flow(["publish"])</code></pre></div></section>
+<section class="step"><b>3</b><div><h2>Inspect before execution</h2><p>This shows the selected target, dependency order, and graph without calling either asset body.</p><pre><code>kazeflow plan daily.py</code></pre></div></section>
+<section class="step"><b>4</b><div><h2>Run only after an explicit decision</h2><p>In a terminal, review the preflight and answer <code>y</code>. In CI or a pipe, pass <code>--yes</code>.</p><pre><code>kazeflow run daily.py
+kazeflow run daily.py --yes</code></pre></div></section>
+<section class="step"><b>5</b><div><h2>Read or retain the result</h2><p>Text output summarizes every task. Add <code>--store</code> to retain a portable result record, then inspect it later.</p><pre><code>kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3
+kazeflow runs list
+kazeflow runs show RUN_ID</code></pre></div></section>
+<div class="callout"><strong>Before you load a script:</strong><p>Python module loading can execute top-level code. Plan skips asset bodies only after that loading step. kazeflow helps you review a trusted flow; it is not a sandbox.</p></div>
+<p>Next: learn the <a href="cli.html">CLI and graph formats</a>, select a <a href="partitions.html">partition</a>, or inspect <a href="results.html">stored results</a>.</p></main>
+<footer><div class="shell"><p>More detail: <a href="https://github.com/kj-9/kazeflow/blob/main/docs/cli.md">CLI guide in the repository</a>.</p></div></footer></body></html>

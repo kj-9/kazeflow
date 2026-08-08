@@ -25,6 +25,16 @@ adapter:
 pip install "kazeflow[tui]"
 ```
 
+## Documentation
+
+Start with the task-oriented [kazeflow documentation site](https://kj-9.github.io/kazeflow/)
+for installation, your first reviewed run, graph output, partitions, and run
+history. The repository guides remain the detailed reference:
+
+- [CLI guide](./docs/cli.md)
+- [Reviewable flows](./docs/reviewable-flows.md)
+- [SQLite run store](./docs/sqlite-run-store.md)
+
 ## CLI quick start
 
 Put a module-level `flow` in a normal Python script, then use the same file for
