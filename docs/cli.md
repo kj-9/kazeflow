@@ -6,7 +6,7 @@ execution commands:
 ```bash
 kazeflow assets ENTRY
 kazeflow plan ENTRY [--target NAME ...] [--partition-key KEY ...] \
-    [--max-concurrency N] [--format text|json]
+    [--max-concurrency N] [--verbose] [--format text|json|mermaid|dot]
 kazeflow run ENTRY [--target NAME ...] [--partition-key KEY ...] \
     [--max-concurrency N] [--yes] [--tui] [--store PATH] [--format text|json]
 kazeflow runs list [--store PATH] [--limit N] [--format text|json]
@@ -77,8 +77,9 @@ terminal.
 
 ## Review a plan
 
-`plan` renders the selected targets, dependency-first task order, partition
-selection, and normalized execution configuration without invoking an asset body:
+`plan` renders a concise summary and a deterministic dependency graph for the
+selected targets without invoking an asset body. The default text projection is for
+human review; use JSON rather than parsing its whitespace in automation:
 
 ```bash
 # Use the declared flow or derived terminal targets.
@@ -89,6 +90,13 @@ kazeflow plan examples/flow.py --target summarize
 
 # Consume the intentionally lossy projection from another program.
 kazeflow plan examples/flow.py --format json
+
+# Export the same resolved graph for Markdown/GitHub or Graphviz.
+kazeflow plan examples/flow.py --format mermaid
+kazeflow plan examples/flow.py --format dot > flow.dot
+
+# Add normalized configuration and per-task metadata to text review output.
+kazeflow plan examples/flow.py --verbose
 ```
 
 Use repeatable `--target` to select one or more targets. `--partition-key` (also
@@ -96,6 +104,12 @@ available as `--partition`) supplies selected partition keys, and
 `--max-concurrency` supplies the execution concurrency value to plan. These options
 are also accepted by `run`, so its preflight and execution use the same resolved
 entry and selections within one invocation.
+
+`--verbose` is intentionally text-only. Combining it with JSON, Mermaid, or DOT is
+a usage error. Mermaid and DOT describe the resolved plan; kazeflow does not invoke
+an external renderer or install Graphviz/Mermaid. Paste Mermaid into a compatible
+Markdown renderer or render DOT with an external tool when a larger graph needs a
+visual layout.
 
 The JSON projection is a review-oriented representation, not a serialization format
 for arbitrary Python values. In particular, it does not expose raw partition-key
@@ -137,11 +151,14 @@ kazeflow run examples/flow.py --yes --tui
 kazeflow run examples/flow.py --yes --store runs.sqlite3
 ```
 
-`--tui` lazily loads the optional Rich presentation before execution. `--store PATH`
-constructs the SQLite store only after a terminal result is available and saves the
-result before successful final output is emitted. If a requested adapter fails, the
-CLI reports that infrastructure failure and does not emit a successful final result;
-it takes precedence over an asset-failure status.
+`--tui` lazily loads the optional Rich presentation before execution. It keeps a
+single live view of waiting, running, succeeded, skipped, and failed tasks plus
+overall completion. Progress is written to standard error, so it remains compatible
+with a one-document JSON result on standard output. `--store PATH` constructs the
+SQLite store only after a terminal result is available and saves the result before
+successful final output is emitted. If a requested adapter fails, the CLI reports
+that infrastructure failure and does not emit a successful final result; it takes
+precedence over an asset-failure status.
 
 ## Inspect local run history
 
@@ -195,6 +212,14 @@ Diagnostics always use standard error. In JSON mode, configuration, entry, and
 infrastructure failures produce no successful document on standard output. A selected
 adapter failure after a terminal asset failure still exits `4` and suppresses the
 final result document.
+
+## Public CLI compatibility
+
+The documented `kazeflow` command names, options, exit statuses, and JSON schemas
+are the public CLI interface. JSON is the stable automation boundary; text output is
+kept stable in meaning for human review but can receive layout improvements. Before a
+future compatible release removes or renames a documented command or option,
+kazeflow will publish a deprecation, migration path, and release note.
 
 ## Current scope
 

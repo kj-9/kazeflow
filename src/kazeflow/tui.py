@@ -25,7 +25,7 @@ from rich.progress import (
 from rich.tree import Tree
 
 from .events import EventKind, ExecutionEvent
-from .plan import FlowPlan
+from .plan import FlowPlan, TaskPlan
 from .results import AttemptReference, AttemptStatus
 
 
@@ -97,10 +97,19 @@ class FlowTUIRenderer:
     """
 
     def __init__(
-        self, total_assets: int | None = None, *, console: Console | None = None
+        self,
+        total_assets: int | None = None,
+        *,
+        plan: FlowPlan | None = None,
+        console: Console | None = None,
     ) -> None:
+        if plan is not None:
+            if total_assets is not None and total_assets != len(plan.tasks):
+                raise ValueError("total_assets must match the supplied plan")
+            total_assets = len(plan.tasks)
         if total_assets is not None and total_assets < 0:
             raise ValueError("total_assets must be non-negative or None")
+        self.task_state_progress = Progress(TextColumn("{task.description}"))
         self.completed_progress = Progress(TextColumn("✓ [green]{task.description}"))
         self.failed_progress = Progress(TextColumn("✗ [red]{task.description}"))
         self.skipped_progress = Progress(TextColumn("– [yellow]{task.description}"))
@@ -118,6 +127,7 @@ class FlowTUIRenderer:
         self.progress_group = Group(
             Panel(
                 Group(
+                    self.task_state_progress,
                     self.completed_progress,
                     self.failed_progress,
                     self.skipped_progress,
@@ -132,6 +142,15 @@ class FlowTUIRenderer:
         )
         self.live = Live(self.progress_group, console=console or Console())
         self.events: list[ExecutionEvent] = []
+        self._planned_tasks = (
+            {task.name: task for task in plan.tasks} if plan is not None else {}
+        )
+        self._task_state_ids = {
+            task.name: self.task_state_progress.add_task(
+                self._task_state_label(task, "○ Waiting")
+            )
+            for task in (plan.tasks if plan is not None else ())
+        }
         self._running_task_ids: dict[AttemptReference, TaskID] = {}
         self._finished_tasks: set[str] = set()
 
@@ -153,7 +172,10 @@ class FlowTUIRenderer:
         """Update presentation state from one neutral lifecycle event."""
 
         self.events.append(event)
-        if event.kind is EventKind.ATTEMPT_STARTED:
+        if event.kind is EventKind.TASK_STARTED:
+            assert event.task is not None
+            self._mark_task_running(event.task.task_name)
+        elif event.kind is EventKind.ATTEMPT_STARTED:
             assert event.attempt is not None
             self._start_attempt(event.attempt)
         elif event.kind is EventKind.ATTEMPT_FINISHED:
@@ -184,6 +206,7 @@ class FlowTUIRenderer:
         if task_name in self._finished_tasks:
             return
         self._finished_tasks.add(task_name)
+        self._mark_task_terminal(task_name, status)
         self.overall_progress.update(self.overall_task_id, advance=1)
         if (
             not any(
@@ -201,10 +224,42 @@ class FlowTUIRenderer:
             return self.skipped_progress
         return self.failed_progress
 
+    def _mark_task_running(self, task_name: str) -> None:
+        task = self._planned_tasks.get(task_name)
+        task_id = self._task_state_ids.get(task_name)
+        if task is not None and task_id is not None:
+            self.task_state_progress.update(
+                task_id, description=self._task_state_label(task, "● Running")
+            )
+
+    def _mark_task_terminal(self, task_name: str, status: AttemptStatus) -> None:
+        task = self._planned_tasks.get(task_name)
+        task_id = self._task_state_ids.get(task_name)
+        if task is None or task_id is None:
+            return
+        marker = {
+            AttemptStatus.SUCCESS: "✓ Succeeded",
+            AttemptStatus.SKIPPED: "– Skipped",
+            AttemptStatus.FAILED: "✗ Failed",
+            AttemptStatus.CANCELLED: "– Cancelled",
+        }[status]
+        self.task_state_progress.update(
+            task_id, description=self._task_state_label(task, marker)
+        )
+
+    @staticmethod
+    def _task_state_label(task: TaskPlan, state: str) -> str:
+        partition = (
+            ""
+            if task.partition_keys is None
+            else f" [partitions: {len(task.partition_keys)}]"
+        )
+        return f"{state}: {task.name}{partition}"
+
 
 def _attempt_label(attempt: AttemptReference) -> str:
     """Return a visible, falsey-safe label without accessing raw execution state."""
 
     if attempt.partition_key_present:
-        return f"{attempt.task.task_name} [partition={attempt.partition_key!r}]"
+        return f"{attempt.task.task_name} [partitioned]"
     return attempt.task.task_name

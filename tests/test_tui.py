@@ -83,8 +83,34 @@ async def test_renderer_consumes_events_and_preserves_result_semantics() -> None
     assert renderer.events[-1].status is FlowStatus.FAILED
     labels = [task.description for task in renderer.failed_progress.tasks]
     labels.extend(task.description for task in renderer.completed_progress.tasks)
-    assert "work [partition=0]" in labels
-    assert "work [partition='']" in labels
+    assert "work [partitioned]" in labels
+    assert "partition=0" not in labels
+    assert "partition=''" not in labels
+
+
+@pytest.mark.asyncio
+async def test_renderer_displays_safe_plan_aware_task_states() -> None:
+    @asset
+    async def source() -> str:
+        return "source"
+
+    @asset
+    async def publish(source: str) -> str:
+        return source
+
+    plan = Flow(["publish"]).plan()
+    renderer = FlowTUIRenderer(
+        plan=plan, console=Console(file=StringIO(), force_terminal=False)
+    )
+    waiting = [task.description for task in renderer.task_state_progress.tasks]
+    assert waiting == ["○ Waiting: source", "○ Waiting: publish"]
+
+    with renderer:
+        result = await Flow(["publish"]).run_async(event_consumer=renderer)
+
+    assert result.status is FlowStatus.SUCCESS
+    states = [task.description for task in renderer.task_state_progress.tasks]
+    assert states == ["✓ Succeeded: source", "✓ Succeeded: publish"]
 
 
 @pytest.mark.asyncio

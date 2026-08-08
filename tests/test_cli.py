@@ -232,6 +232,115 @@ flow = Flow(['publish'])
     assert "secret-west" not in stdout
 
 
+def test_plan_renders_deterministic_text_mermaid_and_dot_graphs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "graph.py",
+        """
+from kazeflow import Flow, asset
+
+@asset
+def fetch_users():
+    return []
+
+@asset
+def fetch_metrics():
+    return []
+
+@asset
+def publish(fetch_users, fetch_metrics):
+    return None
+
+flow = Flow(['publish'])
+""",
+    )
+
+    status, stdout, stderr = _run(capsys, ["plan", str(entry)])
+
+    assert status == 0
+    assert stderr == ""
+    assert stdout.splitlines() == [
+        "Plan: publish",
+        "3 assets · no partition selection · default concurrency",
+        "Graph:",
+        "  fetch_metrics",
+        "  fetch_users",
+        "  fetch_metrics --> publish *",
+        "  fetch_users --> publish *",
+    ]
+
+    status, stdout, stderr = _run(capsys, ["plan", str(entry), "--format", "mermaid"])
+
+    assert status == 0
+    assert stderr == ""
+    assert stdout.splitlines() == [
+        "flowchart LR",
+        '    task_0["fetch_metrics"]',
+        '    task_1["fetch_users"]',
+        '    task_2["publish (target)"]',
+        "    task_0 --> task_2",
+        "    task_1 --> task_2",
+    ]
+
+    status, stdout, stderr = _run(capsys, ["plan", str(entry), "--format", "dot"])
+
+    assert status == 0
+    assert stderr == ""
+    assert stdout.splitlines() == [
+        "digraph kazeflow {",
+        "  rankdir=LR;",
+        '  task_0 [label="fetch_metrics"];',
+        '  task_1 [label="fetch_users"];',
+        '  task_2 [label="publish (target)"];',
+        "  task_0 -> task_2;",
+        "  task_1 -> task_2;",
+        "}",
+    ]
+
+
+def test_plan_verbose_is_text_only_and_keeps_partition_keys_private(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "partitioned_verbose.py",
+        """
+from kazeflow import DatePartitionDef, asset
+
+@asset(partition_def=DatePartitionDef())
+def publish():
+    return None
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "plan",
+            str(entry),
+            "--partition-key",
+            "private-key",
+            "--verbose",
+        ],
+    )
+
+    assert status == 0
+    assert stderr == ""
+    assert "Details:" in stdout
+    assert "private-key" not in stdout
+
+    status, stdout, stderr = _run(
+        capsys,
+        ["plan", str(entry), "--verbose", "--format", "mermaid"],
+    )
+
+    assert status == 2
+    assert stdout == ""
+    assert "--verbose is only available" in stderr
+
+
 @pytest.mark.parametrize(
     ("argv", "expected_status"),
     [
@@ -581,6 +690,37 @@ def publish():
     assert stdout == ""
     assert not marker.exists()
     assert "TUI adapter failed" in stderr
+
+
+def test_run_tui_keeps_json_stdout_as_one_terminal_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "tui_json.py",
+        """
+from kazeflow import Flow, asset
+
+@asset
+def source():
+    return 'done'
+
+@asset
+def publish(source):
+    return source
+
+flow = Flow(['publish'])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["run", str(entry), "--yes", "--tui", "--format", "json"]
+    )
+
+    assert status == 0
+    assert json.loads(stdout)["status"] == "success"
+    assert "Planned run:" in stderr
+    assert "Overall Progress" in stderr
 
 
 def test_runs_list_uses_project_default_store_and_limits_summaries(

@@ -111,8 +111,12 @@ terminal assets as its targets.
 # List assets discovered while loading the script.
 kazeflow assets path/to/flow.py
 
-# Review the default targets and their dependency-first plan.
+# Review the default targets, dependency graph, and execution order.
 kazeflow plan path/to/flow.py
+
+# Export the same resolved graph for Markdown or Graphviz.
+kazeflow plan path/to/flow.py --format mermaid
+kazeflow plan path/to/flow.py --format dot > flow.dot
 
 # Review one target, or emit one machine-readable JSON document to stdout.
 kazeflow plan path/to/flow.py --target summarize
@@ -145,11 +149,12 @@ kazeflow run path/to/flow.py --yes --format json
 
 Declining the prompt is a successful no-op: it does not invoke assets, initialize
 the optional TUI or SQLite store, or produce a run result. By default, `run` uses
-only the core execution path. Select `--tui` for the optional Rich presentation and
-`--store PATH` to persist the completed result to a caller-chosen SQLite database;
-neither adapter is imported or initialized unless explicitly requested. See the
-[CLI guide](docs/cli.md) for the complete command contract, including exit statuses
-and the loading trust boundary.
+only the core execution path. Select `--tui` for the optional Rich presentation: it
+shows queued, running, completed, skipped, and failed work plus overall progress on
+standard error. Select `--store PATH` to persist the completed result to a
+caller-chosen SQLite database; neither adapter is imported or initialized unless
+explicitly requested. See the [CLI guide](docs/cli.md) for the complete command
+contract, including exit statuses and the loading trust boundary.
 
 Saved records can be inspected from the CLI. History commands use the existing
 project-local `.kazeflow/runs.sqlite3` by default and never create it implicitly:
@@ -218,7 +223,7 @@ plan = flow.plan(run_config)
 # This is an explicit presentation choice and does not execute assets.
 show_plan_tree(plan)
 
-with FlowTUIRenderer(total_assets=len(plan.tasks)) as renderer:
+with FlowTUIRenderer(plan=plan) as renderer:
     result = run(
         ["summarize"], run_config, event_consumer=renderer
     )

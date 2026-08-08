@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M10 Complete; M11–M12 Proposed
+> Status: M0–M11 Complete
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -31,6 +31,11 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M4: zero-dependency coreとcore/TUI package checksを実装済み。
 - M5: reviewable flow workflowのdocumentationとexampleを整備済み。
 - M6: 明示的なSQLite run-store adapter、schema version、migration、round-trip testsを実装し、archive済み。
+- M7: public CLIのentry、trust boundary、output、exit status契約を固定し、archive済み。
+- M8: script-firstな`assets`/`plan` CLIとportable JSON projectionを実装し、archive済み。
+- M9: 明示承認付き`run`、optional TUI、SQLite保存を実装し、archive済み。
+- M10: local run historyのlist/show/compare CLIを実装し、archive済み。
+- M11: public CLI compatibility、plan graph projection、plan-aware TUI progress、wheel release checksを実装し、archive済み。
 
 ## Next direction: a reviewable CLI
 
@@ -284,6 +289,10 @@ CLIを公開利用できる契約として安定させる。
 対象:
 
 - `--help`、error message、exit code、JSON schemaの互換性方針
+- 人間向け`plan`の要約と決定的なASCII DAG表示
+- `--format mermaid`と`--format dot`による、外部可視化ツール向けのplan projection
+- 詳細なtask、partition、configを必要時だけ表示するUX
+- `--tui`選択時だけの、実行中task状態とoverall progressの読みやすい表示
 - READMEの最短導入、review、CI利用例
 - wheelからのCLI smoke testと、core-only、TUI、SQLiteの組み合わせ検証
 - release notesとCLI migration policy
@@ -292,25 +301,6 @@ CLIを公開利用できる契約として安定させる。
 
 - core-only wheel環境で`kazeflow plan`と`kazeflow run`が動作する。
 - optional featureの有無による挙動が文書化・検証されている。
-
-### M12: Make execution plans legible
-
-OpenSpec change: `add-plan-graph-rendering`
-
-`plan`を、実行順を列挙するだけでなく、依存関係の形まで一度に判断できる
-人間向けのreview画面へ育てる。これは静的解析や安全性の保証ではなく、解決済みの
-`FlowPlan`を読みやすく投影するための機能である。
-
-対象:
-
-- default text outputでの簡潔なplan summaryと、dependency-firstのASCII DAG表示
-- 分岐、合流、複数target、partitioned taskを曖昧にしない決定的な表現
-- `--format mermaid`と`--format dot`による、外部の可視化ツールへ渡せるDAG投影
-- 詳細なtask/partition/config情報を必要時だけ表示する`--verbose`などのUX設計
-- JSON outputの既存schemaとstdout/stderr境界を維持する互換性方針
-
-完了条件:
-
 - 同じ解決済みplanから常に同じtext、Mermaid、DOT表現が得られる。
 - text outputだけでtarget、依存関係、実行順、partitionの有無を判断できる。
 - Graphviz、Richその他のthird-party dependencyをcore CLIへ追加しない。
@@ -378,9 +368,7 @@ M8のplan contractを固定した後、M9のrun commandとM10のrun-history comm
 `src/kazeflow/cli.py`はM9とM10で共有するhotspotのため、同じwaveで1人だけが編集する。
 SQLite adapterの保存schemaを変更する場合も、migration ownerを単独で置く。
 
-### Wave 6: Stable, legible CLI
-
-M11で公開CLIの互換性方針を固定した後、M12でplan projectionを改善する。
+M11では公開CLIの互換性方針とplan projectionを一緒に固定する。
 
 - Plan rendering owner: `src/kazeflow/cli.py`のtext、Mermaid、DOT projection
 - Test owner: graph shape、deterministic order、JSON compatibilityの専用tests

@@ -101,10 +101,42 @@ assert json.loads(history.stdout)["run_id"] == stored_run_id
 """
 
 TUI_PROGRAM = """
+import json
+from pathlib import Path
+import subprocess
+import sys
+
 from kazeflow.tui import FlowTUIRenderer
 
 renderer = FlowTUIRenderer(total_assets=0)
 assert renderer.overall_progress.tasks[0].total == 0
+
+flow_file = Path("tui_flow.py")
+flow_file.write_text(
+    '''
+from kazeflow import Flow, asset
+
+@asset
+def source():
+    return "source"
+
+@asset
+def publish(source):
+    return source
+
+flow = Flow(["publish"])
+''',
+    encoding="utf-8",
+)
+command = Path(sys.executable).with_name("kazeflow")
+run_cli = subprocess.run(
+    [str(command), "run", str(flow_file), "--yes", "--tui", "--format", "json"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+assert json.loads(run_cli.stdout)["status"] == "success"
+assert "Overall Progress" in run_cli.stderr
 """
 
 

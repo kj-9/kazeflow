@@ -82,7 +82,14 @@ def _parser() -> argparse.ArgumentParser:
         "--partition-key", "--partition", dest="partition_keys", action="append"
     )
     plan.add_argument("--max-concurrency", type=int)
-    plan.add_argument("--format", choices=("text", "json"), default="text")
+    plan.add_argument(
+        "--format", choices=("text", "json", "mermaid", "dot"), default="text"
+    )
+    plan.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show configuration and task metadata in text output",
+    )
 
     run = commands.add_parser("run", help="review and deliberately execute a flow")
     run.add_argument("entry", help="a Python file or module:attribute entry")
@@ -123,6 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parser.parse_args(argv)
         if args.command == "runs":
             return _run_history(args)
+        _validate_output_selection(args)
         _validate_entry_syntax(args.entry)
         if args.command == "assets":
             loaded = _load_entry(args.entry)
@@ -163,6 +171,11 @@ def _validate_entry_syntax(entry: str) -> None:
             raise _UsageError("explicit entries must use source:attribute")
     elif not entry.endswith(".py"):
         raise _UsageError("bare entries must be Python files ending in .py")
+
+
+def _validate_output_selection(args: argparse.Namespace) -> None:
+    if args.command == "plan" and args.verbose and args.format != "text":
+        raise _UsageError("--verbose is only available with --format text")
 
 
 def _load_entry(entry: str) -> _LoadedEntry:
@@ -305,7 +318,13 @@ def _emit_plan(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
     if args.format == "json":
         _json_output(_plan_record(selected.plan))
         return
-    _text_plan(selected.plan)
+    if args.format == "mermaid":
+        _mermaid_plan(selected.plan)
+        return
+    if args.format == "dot":
+        _dot_plan(selected.plan)
+        return
+    _text_plan(selected.plan, verbose=args.verbose)
 
 
 def _select_run(
@@ -373,9 +392,7 @@ def _execute(selected: _SelectedRun, *, use_tui: bool) -> Any:
 
         from .tui import FlowTUIRenderer
 
-        renderer = FlowTUIRenderer(
-            total_assets=len(selected.plan.tasks), console=Console(stderr=True)
-        )
+        renderer = FlowTUIRenderer(plan=selected.plan, console=Console(stderr=True))
         with renderer:
             return asyncio.run(
                 selected.flow.run_async(selected.config, event_consumer=renderer)
@@ -649,36 +666,108 @@ def _plan_record(plan: FlowPlan) -> dict[str, Any]:
 
 
 def _text_plan(
-    plan: FlowPlan, *, file: TextIO | None = None, heading: str | None = None
+    plan: FlowPlan,
+    *,
+    file: TextIO | None = None,
+    heading: str | None = None,
+    verbose: bool = False,
 ) -> None:
     stream = file if file is not None else sys.stdout
     if heading is not None:
         print(heading, file=stream)
-    print("Targets:", file=stream)
-    for target in plan.targets:
-        print(f"- {target}", file=stream)
-    print("Configuration:", file=stream)
+    targets = ", ".join(plan.targets)
+    print(f"Plan: {targets}", file=stream)
     print(
-        f"- max_concurrency: {plan.config.max_concurrency if plan.config.max_concurrency is not None else 'default'}",
+        f"{len(plan.tasks)} assets · "
+        f"{_partition_summary(plan)} · {_concurrency_summary(plan)}",
         file=stream,
     )
-    count = plan.config.partition_keys
-    print(
-        f"- partition_keys: {'not supplied' if count is None else f'{len(count)} selected'}",
-        file=stream,
-    )
-    print("Tasks (dependency-first):", file=stream)
+    print("Graph:", file=stream)
+    for task in plan.tasks:
+        label = _text_task_label(task.name, task.partition_keys, plan.targets)
+        if task.dependencies:
+            for dependency in task.dependencies:
+                print(f"  {dependency} --> {label}", file=stream)
+        else:
+            print(f"  {label}", file=stream)
+    if not verbose:
+        return
+    print("Details:", file=stream)
+    print(f"- targets: {targets}", file=stream)
+    print(f"- max_concurrency: {_concurrency_summary(plan)}", file=stream)
+    print(f"- partition_keys: {_partition_summary(plan)}", file=stream)
     for task in plan.tasks:
         dependencies = ", ".join(task.dependencies) or "none"
-        partitions = (
+        partition_detail = (
             "unpartitioned"
             if task.partition_keys is None
             else f"{len(task.partition_keys)} selected"
         )
         print(
-            f"- {task.name} (dependencies: {dependencies}; partitions: {partitions})",
+            f"- {task.name} (dependencies: {dependencies}; partitions: {partition_detail})",
             file=stream,
         )
+
+
+def _concurrency_summary(plan: FlowPlan) -> str:
+    if plan.config.max_concurrency is None:
+        return "default concurrency"
+    return f"max concurrency {plan.config.max_concurrency}"
+
+
+def _partition_summary(plan: FlowPlan) -> str:
+    if plan.config.partition_keys is None:
+        return "no partition selection"
+    return f"{len(plan.config.partition_keys)} partitions selected"
+
+
+def _text_task_label(
+    name: str, partition_keys: Sequence[Any] | None, targets: Sequence[str]
+) -> str:
+    suffix = " *" if name in targets else ""
+    partition = (
+        "" if partition_keys is None else f" [partitions: {len(partition_keys)}]"
+    )
+    return f"{name}{partition}{suffix}"
+
+
+def _graph_node_ids(plan: FlowPlan) -> dict[str, str]:
+    return {task.name: f"task_{index}" for index, task in enumerate(plan.tasks)}
+
+
+def _graph_label(task: Any, targets: Sequence[str]) -> str:
+    label = task.name
+    if task.partition_keys is not None:
+        label += f" [partitions: {len(task.partition_keys)}]"
+    if task.name in targets:
+        label += " (target)"
+    return label
+
+
+def _mermaid_plan(plan: FlowPlan) -> None:
+    node_ids = _graph_node_ids(plan)
+    print("flowchart LR")
+    for task in plan.tasks:
+        print(
+            f"    {node_ids[task.name]}[{json.dumps(_graph_label(task, plan.targets))}]"
+        )
+    for task in plan.tasks:
+        for dependency in task.dependencies:
+            print(f"    {node_ids[dependency]} --> {node_ids[task.name]}")
+
+
+def _dot_plan(plan: FlowPlan) -> None:
+    node_ids = _graph_node_ids(plan)
+    print("digraph kazeflow {")
+    print("  rankdir=LR;")
+    for task in plan.tasks:
+        print(
+            f"  {node_ids[task.name]} [label={json.dumps(_graph_label(task, plan.targets))}];"
+        )
+    for task in plan.tasks:
+        for dependency in task.dependencies:
+            print(f"  {node_ids[dependency]} -> {node_ids[task.name]};")
+    print("}")
 
 
 def _json_output(value: dict[str, Any]) -> None:
