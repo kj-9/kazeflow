@@ -559,6 +559,113 @@ def broken():
     assert "Planned run:" in stderr
 
 
+def test_text_run_summarizes_tasks_failures_and_safe_partition_details(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "results.sqlite3"
+    entry = _script(
+        tmp_path,
+        "text_result.py",
+        """
+from kazeflow import DatePartitionDef, Flow, asset
+
+@asset
+def source():
+    return "raw output must stay private"
+
+@asset(partition_def=DatePartitionDef())
+def publish(source):
+    raise RuntimeError("portable failure")
+
+flow = Flow(["publish"])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "run",
+            str(entry),
+            "--yes",
+            "--partition-key",
+            "private-east",
+            "--partition-key",
+            "private-west",
+            "--store",
+            str(store),
+            "--verbose",
+        ],
+    )
+
+    assert status == 1
+    assert "Planned run:" in stderr
+    assert "Run result:" in stdout
+    assert "- status: failed" in stdout
+    assert "✓ source (success;" in stdout
+    assert "✗ publish (failed;" in stdout
+    assert "partitioned; attempts: 2" in stdout
+    assert "failure: RuntimeError: portable failure" in stdout
+    assert "Attempt details:" in stdout
+    assert "attempt 1/2 (partitioned; failed;" in stdout
+    assert "kazeflow runs show " in stdout
+    assert f"--store {store}" in stdout
+    assert "private-east" not in stdout
+    assert "private-west" not in stdout
+    assert "raw output must stay private" not in stdout
+
+
+def test_run_verbose_is_text_only_before_loading_an_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "loaded.txt"
+    entry = _script(
+        tmp_path,
+        "verbose_json.py",
+        f"""
+from pathlib import Path
+Path({str(marker)!r}).write_text("loaded", encoding="utf-8")
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["run", str(entry), "--yes", "--verbose", "--format", "json"]
+    )
+
+    assert status == 2
+    assert stdout == ""
+    assert "--verbose is only available" in stderr
+    assert not marker.exists()
+
+
+def test_text_run_explains_a_dependency_blocked_task(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "skipped.py",
+        """
+from kazeflow import Flow, asset
+
+@asset
+def broken():
+    raise RuntimeError("expected failure")
+
+@asset
+def publish(broken):
+    raise AssertionError("blocked dependency must not invoke this")
+
+flow = Flow(["publish"])
+""",
+    )
+
+    status, stdout, _stderr = _run(capsys, ["run", str(entry), "--yes", "--verbose"])
+
+    assert status == 1
+    assert "– publish (skipped;" in stdout
+    assert "reason: dependency_blocked" in stdout
+    assert "attempt 1/1 (unpartitioned; skipped;" in stdout
+
+
 def test_run_rejects_ambiguous_discovered_targets_without_invocation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

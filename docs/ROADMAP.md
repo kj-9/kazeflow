@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M11 Complete
+> Status: M0–M12 Complete
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -36,6 +36,26 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M9: 明示承認付き`run`、optional TUI、SQLite保存を実装し、archive済み。
 - M10: local run historyのlist/show/compare CLIを実装し、archive済み。
 - M11: public CLI compatibility、plan graph projection、plan-aware TUI progress、wheel release checksを実装し、archive済み。
+- M12: 実行結果のreview projectionとPartitionのユーザー導線を実装済み。
+
+### M12: Make post-run review and partitions understandable
+
+OpenSpec change: `improve-run-cli-guidance`
+
+CLIのpreflightと同じ水準で、完了後の結果を理解できるようにする。Partitionを「任意の
+sliceを選んでreviewしてから再実行する」ための機能として、導入時から説明する。
+
+対象:
+
+- text `run`のtask単位status、duration、skip/failure summaryと安全な詳細表示
+- raw partition key/output/exceptionを露出しないtext-only `--verbose`
+- CLI quick-start、Partitionのrepeatable selection、plan-first reviewのdocumentation
+
+完了条件:
+
+- text run outputだけでtaskごとのterminal outcomeをreviewできる。
+- JSON recordとexit statusの既存契約を変更しない。
+- 新規利用者がscript、plan、selected partition run、result/history inspectionまで辿れる。
 
 ## Next direction: a reviewable CLI
 

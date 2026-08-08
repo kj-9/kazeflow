@@ -99,6 +99,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--max-concurrency", type=int)
     run.add_argument("--format", choices=("text", "json"), default="text")
+    run.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show safe attempt-level detail in text output",
+    )
     run.add_argument("--yes", action="store_true", help="approve execution")
     run.add_argument("--tui", action="store_true", help="show optional Rich progress")
     run.add_argument("--store", metavar="PATH", help="save the completed run to SQLite")
@@ -174,7 +179,7 @@ def _validate_entry_syntax(entry: str) -> None:
 
 
 def _validate_output_selection(args: argparse.Namespace) -> None:
-    if args.command == "plan" and args.verbose and args.format != "text":
+    if args.command in {"plan", "run"} and args.verbose and args.format != "text":
         raise _UsageError("--verbose is only available with --format text")
 
 
@@ -362,7 +367,7 @@ def _run_selected(loaded: _LoadedEntry, args: argparse.Namespace) -> int:
 
     result = _execute(selected, use_tui=args.tui)
     _save_result(result, args.store)
-    _emit_result(result, args.format)
+    _emit_result(result, args.format, verbose=args.verbose, store_path=args.store)
     return EXIT_SUCCESS if result.status.value == "success" else 1
 
 
@@ -413,14 +418,86 @@ def _save_result(result: Any, path: str | None) -> None:
         raise _InfrastructureError(f"SQLite store failed: {error}") from error
 
 
-def _emit_result(result: Any, output_format: str) -> None:
+def _emit_result(
+    result: Any,
+    output_format: str,
+    *,
+    verbose: bool = False,
+    store_path: str | None = None,
+) -> None:
     if output_format == "json":
         _json_output(result.to_record())
         return
     print("Run result:")
     print(f"- run_id: {result.run_id}")
     print(f"- status: {result.status.value}")
-    print(f"- tasks: {len(result.tasks)}")
+    print(f"- duration: {_duration_text(result.duration)}")
+    print("Tasks:")
+    for task in result.tasks:
+        print(f"- {_text_task_result(task)}")
+    if verbose:
+        _emit_attempt_details(result)
+    if result.status.value == "failed" and store_path is not None:
+        print("Next:")
+        print(f"- kazeflow runs show {result.run_id} --store {store_path}")
+
+
+def _duration_text(duration: Any) -> str:
+    return f"{duration.total_seconds():.3f}s"
+
+
+def _text_task_result(task: Any) -> str:
+    detail = [task.status.value, _duration_text(task.duration)]
+    if task.is_partitioned:
+        detail.extend(("partitioned", f"attempts: {len(task.attempts)}"))
+    if task.reason is not None:
+        detail.append(f"reason: {task.reason.value}")
+    failure = _task_failure(task)
+    if failure is not None:
+        detail.append(f"failure: {failure.exception_type}: {failure.message}")
+    return f"{_status_marker(task.status.value)} {task.task.task_name} ({'; '.join(detail)})"
+
+
+def _task_failure(task: Any) -> Any | None:
+    for attempt in task.attempts:
+        if attempt.failure is not None:
+            return attempt.failure
+    return None
+
+
+def _status_marker(status: str) -> str:
+    return {
+        "success": "✓",
+        "failed": "✗",
+        "skipped": "–",
+        "cancelled": "–",
+    }.get(status, "?")
+
+
+def _emit_attempt_details(result: Any) -> None:
+    print("Attempt details:")
+    for task in result.tasks:
+        print(f"- {task.task.task_name}:")
+        attempt_count = len(task.attempts)
+        if not task.attempts:
+            print("  - no attempts")
+            continue
+        for index, attempt in enumerate(task.attempts, start=1):
+            detail = [
+                "partitioned"
+                if attempt.attempt.partition_key_present
+                else "unpartitioned",
+                attempt.status.value,
+                _duration_text(attempt.duration),
+            ]
+            if attempt.reason is not None:
+                detail.append(f"reason: {attempt.reason.value}")
+            if attempt.failure is not None:
+                detail.append(
+                    "failure: "
+                    f"{attempt.failure.exception_type}: {attempt.failure.message}"
+                )
+            print(f"  - attempt {index}/{attempt_count} ({'; '.join(detail)})")
 
 
 def _run_history(args: argparse.Namespace) -> int:

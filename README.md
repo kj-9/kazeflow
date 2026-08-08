@@ -4,6 +4,11 @@
 programs. Define ordinary functions as assets, inspect their dependency plan, then
 run selected targets and receive a structured result.
 
+It is for the moment when a script has become a few dependent steps: keep writing
+ordinary Python, but make the work order reviewable before execution and the result
+understandable afterward. There is no daemon, service, or required runtime
+dependency.
+
 ## Install
 
 Install the standard-library-only core to define assets, inspect plans, and run
@@ -19,6 +24,37 @@ adapter:
 ```bash
 pip install "kazeflow[tui]"
 ```
+
+## CLI quick start
+
+Put a module-level `flow` in a normal Python script, then use the same file for
+review and deliberate execution:
+
+```python
+# daily.py
+from kazeflow import Flow, asset
+
+@asset
+def fetch() -> str:
+    return "report input"
+
+@asset
+def publish(fetch: str) -> None:
+    print(fetch)
+
+flow = Flow(["publish"])
+```
+
+```bash
+pip install kazeflow
+kazeflow plan daily.py             # inspect targets, order, and graph
+kazeflow run daily.py              # review again, then answer y/yes
+kazeflow run daily.py --yes        # explicit approval for CI or a pipe
+```
+
+The final text result names every task, its outcome, and duration. Add
+`--verbose` when you need safe attempt-level detail; use `--format json` for a
+single portable record in automation.
 
 ## Define, inspect, and run a flow
 
@@ -127,6 +163,41 @@ kazeflow plan path/to/flow.py --format json
 Python execution, however, so its top-level statements and imports can have side
 effects. Treat a script entry as trusted code to load; the inspection commands are
 not a sandbox or a safety approval.
+
+## Select a partition to rerun one slice
+
+Partitions divide an asset into independently selectable slices—often dates,
+regions, or files. An unpartitioned asset runs once. A partitioned asset runs for
+the keys chosen by its partition definition, so a targeted rerun can avoid
+reprocessing every slice.
+
+```python
+from kazeflow import DatePartitionDef, Flow, asset
+
+@asset(partition_def=DatePartitionDef())
+def publish_daily() -> None:
+    print("publish the selected day")
+
+flow = Flow(["publish_daily"])
+```
+
+Always plan the selection first, then pass exactly the same options to the run:
+
+```bash
+kazeflow plan daily.py --partition-key 2026-08-08
+kazeflow run daily.py --partition-key 2026-08-08 --yes
+
+# Repeat the option to select several slices.
+kazeflow plan daily.py --partition-key 2026-08-08 --partition-key 2026-08-09
+```
+
+Omitting `--partition-key` leaves selection to the flow's partition definition.
+Passing keys selects those values; strings are passed to that definition without
+CLI coercion. The Python API can also represent an explicit empty selection, which
+plans no partition work. Values such as `0`, `""`, and `False` are still present
+keys in the Python API and are not treated as omitted selection. Do not assume an
+arbitrary script accepts every textual key—review the plan and the partition
+definition before running it.
 
 ## Deliberately run a reviewed script
 

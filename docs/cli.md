@@ -8,7 +8,8 @@ kazeflow assets ENTRY
 kazeflow plan ENTRY [--target NAME ...] [--partition-key KEY ...] \
     [--max-concurrency N] [--verbose] [--format text|json|mermaid|dot]
 kazeflow run ENTRY [--target NAME ...] [--partition-key KEY ...] \
-    [--max-concurrency N] [--yes] [--tui] [--store PATH] [--format text|json]
+    [--max-concurrency N] [--yes] [--tui] [--store PATH] [--verbose] \
+    [--format text|json]
 kazeflow runs list [--store PATH] [--limit N] [--format text|json]
 kazeflow runs show RUN_ID [--store PATH] [--format text|json]
 kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID [--store PATH] [--format text|json]
@@ -16,6 +17,10 @@ kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID [--store PATH] [--format text|jso
 
 They supplement the Python API. `assets` and `plan` inspect only; `run` requires a
 separate, explicit decision before it invokes asset bodies.
+
+Start with `kazeflow plan SCRIPT.py`, review the declared work, then use
+`kazeflow run SCRIPT.py --yes` when ready. The CLI is a small review layer over a
+normal Python script: it does not need a service or database to plan or run.
 
 ## Define a script entry
 
@@ -137,6 +142,42 @@ In text mode, a completed run writes a human-readable terminal result summary. W
 progress presentation, and diagnostics use standard error, leaving JSON stdout safe
 for automation. Raw outputs, exception objects, and raw partition-key values are not
 included in that record.
+
+Text output lists the run ID, status, total duration, then each task in result
+order with its status and duration. Failed tasks include their portable exception
+type and message; skipped tasks include their reason. Partitioned tasks disclose
+only that they are partitioned and their number of attempts, never their raw key.
+Use `--verbose` with text output to append safe, ordered per-attempt detail. It is
+not available with `--format json`, which remains the stable one-document
+automation boundary.
+
+When a failed run was saved with `--store PATH`, its text result prints the exact
+`kazeflow runs show RUN_ID --store PATH` follow-up command.
+
+## Select partitions deliberately
+
+A partitioned asset represents independent slices of the same task, commonly days
+or regions. An unpartitioned asset executes once. `--partition-key` is repeatable:
+use it to select exactly the slices you want to review and rerun.
+
+```bash
+# First review one date without invoking an asset body.
+kazeflow plan daily.py --target publish_daily --partition-key 2026-08-08
+
+# Execute that same reviewed selection only after explicit approval.
+kazeflow run daily.py --target publish_daily --partition-key 2026-08-08 --yes
+
+# Select more than one slice.
+kazeflow plan daily.py --partition-key 2026-08-08 --partition-key 2026-08-09
+```
+
+The option values are strings passed to the script's partition definition; the CLI
+does not guess a type or synthesize a current date. Omitting the option means no
+explicit CLI selection, while passing keys supplies a selection. The Python API can
+also supply an explicit empty selection, which represents no partition work when
+the flow supports it. Falsey Python values such as `0`, `""`, and `False` remain
+present keys rather than an omitted selection. Inspect the plan before running: the
+partition definition, not the CLI, determines which values are valid.
 
 ### Optional adapters
 
