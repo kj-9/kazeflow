@@ -145,11 +145,18 @@ kazeflowがゴールに沿っているかを、少なくとも次の基準で判
 
 ## Documentation structure
 
-当面は、このファイルをproject goal、設計原則、non-goalsのsingle source of truthとする。
+ユーザー向けの導入、利用方法、CLI referenceは
+[GitHub Pages](https://kj-9.github.io/kazeflow/)をsingle source of truthとする。
+READMEはpackageの概要と最短exampleからPagesへ案内する入口に留め、同じ利用ガイドを
+repository Markdownへ複製しない。
+
+このファイルはproject goal、設計原則、non-goalsのsingle source of truthとする。
+Pagesの利用ガイドとは対象読者と更新理由を分離する。
 
 実装計画や設計詳細が増えた場合は、目的の異なる文書として分離する。
 
 - [ROADMAP.md](./ROADMAP.md): 変更されることを前提とした実装順序と優先度
+- [release-notes.md](./release-notes.md): releaseごとの互換性と変更履歴
 - `DESIGN.md`: 現在のarchitectureと主要な技術設計
 - `decisions/`: 個別の重要な設計判断とその背景
 

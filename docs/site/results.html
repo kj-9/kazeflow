@@ -1,10 +1,30 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Results and history — kazeflow</title><link rel="stylesheet" href="styles.css"></head>
 <body><header><div class="shell topbar"><a class="brand" href="index.html">kaze<span>flow</span></a><nav aria-label="Primary navigation"><a href="index.html">Overview</a><a href="getting-started.html">Get started</a><a href="cli.html">CLI &amp; graphs</a><a href="partitions.html">Partitions</a><a aria-current="page" href="results.html">Results &amp; history</a></nav></div></header>
-<main class="shell"><div class="eyebrow">Review after execution</div><h1>See the outcome, then keep only what you choose.</h1><p class="lede">A completed text run tells you each task's terminal status and duration. A structured result is also returned to Python. Storage is always an explicit opt-in.</p>
-<h2>Read a result in the terminal</h2><pre><code>kazeflow run daily.py --yes<br>kazeflow run daily.py --yes --verbose</code></pre><p>The normal text summary includes the run ID, overall status, duration, and each task's status. Failed tasks include portable error type and message; skipped tasks include a reason. <code>--verbose</code> adds attempt-level detail without showing raw partition keys, outputs, exception objects, or tracebacks.</p>
-<h2>Save a run only when you request it</h2><pre><code>kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3</code></pre><p>Without <code>--store</code>, kazeflow does not create a database. With it, the CLI writes the terminal portable record after the run completes.</p>
-<h2>Find, inspect, and compare stored runs</h2><pre><code># The default read location is ./.kazeflow/runs.sqlite3<br>kazeflow runs list<br>kazeflow runs show RUN_ID<br>kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID<br><br># Or select a store explicitly.<br>kazeflow runs list --store path/to/runs.sqlite3</code></pre><p>A successful list and show begin like this:</p><pre><code>$ kazeflow runs list
+<main class="shell"><div class="eyebrow">Review after execution</div><h1>See the outcome, then keep only what you choose.</h1><p class="lede">A completed run explains every task's terminal outcome. Persistence is explicit, local, and intentionally lossy.</p>
+<h2>Read a result in the terminal</h2><pre><code>kazeflow run daily.py --yes
+kazeflow run daily.py --yes --verbose
+kazeflow run daily.py --yes --format json</code></pre><p>Text includes the run ID, overall status and duration, then every task in plan order. Failed tasks include portable exception type and message; skipped tasks include a reason. <code>--verbose</code> adds ordered attempt-level status, duration, failure, and blocker detail without raw keys, outputs, exception objects, or tracebacks.</p><p>JSON emits exactly one portable <code>RunResult</code> record on standard output. It is the automation boundary; progress and diagnostics remain on standard error.</p>
+<h2>Inspect the in-memory result in Python</h2><pre><code>from kazeflow import run
+
+result = run(["publish"])
+print(result.run_id, result.status, result.duration)
+
+for task in result.tasks:
+    print(task.task.task_name, task.status)
+    for attempt in task.attempts:
+        print(attempt.status, attempt.output)
+        print(attempt.failure, attempt.blocked_by)</code></pre><p>The Python result can retain arbitrary output and real partition keys for the current process. <code>result.to_record()</code> creates a new JSON-friendly projection; it does not save anything.</p>
+<h2>Save a run only when you request it</h2><pre><code>mkdir -p .kazeflow
+kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3</code></pre><p>Without <code>--store</code>, execution never creates a database. With it, the CLI creates or initializes the selected SQLite file after a terminal result exists, stores the portable record, then prints the final result. The default history read location is <code>./.kazeflow/runs.sqlite3</code>, but execution still requires an explicit <code>--store</code>.</p>
+<h2>Find, inspect, and compare stored runs</h2><pre><code># Read the existing default store.
+kazeflow runs list
+kazeflow runs list --limit 10 --format json
+kazeflow runs show RUN_ID
+kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID
+
+# Read another existing database.
+kazeflow runs list --store path/to/runs.sqlite3</code></pre><p>Representative text output:</p><pre><code>$ kazeflow runs list
 Stored runs:
 - &lt;run-id&gt; (success; saved_at: &lt;timestamp&gt;; schema: 1)
 
@@ -14,7 +34,14 @@ Stored run:
 - status: success
 - saved_at: &lt;timestamp&gt;
 Portable record:
-{ ... }</code></pre><p>Run IDs and timestamps vary. <code>runs show</code> continues with the complete portable record; use <code>--format json</code> when another tool needs a stable single-document result. Text output is for human review; it can evolve while preserving its documented meaning.</p>
-<div class="callout"><strong>Portable by design.</strong><p>Stored and JSON records intentionally omit raw asset output, exception objects, and raw partition-key values. This keeps a result useful to inspect without pretending arbitrary Python values are safe or portable records.</p></div>
-<p>More detail: <a href="https://github.com/kj-9/kazeflow/blob/main/docs/sqlite-run-store.md">SQLite run store guide</a> and <a href="https://github.com/kj-9/kazeflow/blob/main/docs/cli.md#run-history">CLI history reference</a>.</p></main>
+{ ... }</code></pre><p>Run IDs and timestamps vary. Lists are ordered by saved time and run ID. <code>show</code> returns the stored portable envelope. <code>compare</code> preserves left/right argument order and compares run and task aggregates; it does not claim to match individual raw partition keys.</p>
+<h2>What the SQLite adapter stores</h2><div class="table-wrap"><table><thead><tr><th>Stored</th><th>Not stored</th></tr></thead><tbody><tr><td>Run/task/attempt order and terminal statuses</td><td>Raw task outputs</td></tr><tr><td>UTC timestamps, durations, skip reasons, blockers</td><td>Raw exception objects</td></tr><tr><td>Portable failure type, message, and traceback metadata</td><td>Raw partition-key values</td></tr><tr><td>Whether each attempt is partitioned</td><td>A reconstructed in-memory <code>RunResult</code></td></tr></tbody></table></div><p>Falsey partition keys remain distinguishable as “present,” although their original values are not recoverable. Non-serializable outputs, exceptions, and keys therefore do not prevent persistence.</p>
+<h2>Direct Python storage API</h2><pre><code>from kazeflow.sqlite_store import SQLiteRunStore
+
+with SQLiteRunStore("runs.sqlite3") as store:
+    saved = store.save(result)
+    loaded = store.load(result.run_id)
+    history = store.list_runs(limit=10)</code></pre><p>Constructing a store explicitly creates or initializes schema version 1. Saving a duplicate run ID raises <code>ValueError</code>; loading an unknown ID raises <code>KeyError</code>. Newer, unversioned non-empty, malformed, or incompatible databases are rejected rather than guessed or downgraded. Use one caller-owned store connection per thread; normal SQLite local locking still applies.</p>
+<div class="callout"><strong>Portable by design.</strong><p>The store is a local adapter, not automatic history, a remote database, a daemon, or a sandbox. Protect the file, choose when to save, and keep the original Python result when raw values matter.</p></div>
+<p>For exit statuses and adapter failure precedence, see the <a href="cli.html">CLI reference</a>. For partition identity boundaries, see <a href="partitions.html">Partitions</a>.</p></main>
 <footer><div class="shell"><p>Return to the <a href="index.html">documentation overview</a>.</p></div></footer></body></html>

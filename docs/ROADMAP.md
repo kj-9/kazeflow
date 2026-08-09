@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M12 Complete; M13 in progress
+> Status: M0–M13 Complete
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -37,6 +37,7 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M10: local run historyのlist/show/compare CLIを実装し、archive済み。
 - M11: public CLI compatibility、plan graph projection、plan-aware TUI progress、wheel release checksを実装し、archive済み。
 - M12: 実行結果のreview projectionとPartitionのユーザー導線を実装済み。
+- M13: GitHub Pagesをユーザー向けdocumentationの正本として公開し、repository内の重複guideを集約済み。
 
 ### M12: Make post-run review and partitions understandable
 
@@ -61,19 +62,21 @@ sliceを選んでreviewしてから再実行する」ための機能として、
 
 OpenSpec change: `publish-github-pages-docs`
 
-既存のrepository Markdownを正本として残しつつ、初めて利用する人が導入から最初のreviewed
-run、Partition、run historyまで迷わず進めるGitHub Pagesを公開する。
+初めて利用する人が導入から最初のreviewed run、Partition、run historyまで迷わず進める
+GitHub Pagesを公開し、ユーザー向けdocumentationのsingle source of truthとする。
 
 対象:
 
 - 静的なlanding page、getting-started、CLI/graph、Partition、result/historyの導線
 - GitHub ActionsによるPR時の静的site検証と`main`からのPages deployment
 - Python entryのimport副作用とasset body未実行保証を区別するtrust boundaryの明示
+- READMEをpackage landing pageへ縮約し、重複するrepository user guideをPagesへ集約
 
 完了条件:
 
 - Python runtime dependencyやpackage behaviorを追加・変更しない。
 - 公開siteだけで最初のscript、plan、明示runの手順を辿れる。
+- 公開siteだけでCLI、Partition、result、SQLite historyの詳細を確認できる。
 - GitHub Pagesの公開workflowがrepository内で再現可能に定義されている。
 
 ## Next direction: a reviewable CLI

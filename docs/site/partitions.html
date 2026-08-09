@@ -1,10 +1,24 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Partitions — kazeflow</title><link rel="stylesheet" href="styles.css"></head>
 <body><header><div class="shell topbar"><a class="brand" href="index.html">kaze<span>flow</span></a><nav aria-label="Primary navigation"><a href="index.html">Overview</a><a href="getting-started.html">Get started</a><a href="cli.html">CLI &amp; graphs</a><a aria-current="page" href="partitions.html">Partitions</a><a href="results.html">Results &amp; history</a></nav></div></header>
-<main class="shell"><div class="eyebrow">Select a slice deliberately</div><h1>Plan one date. Then run that date.</h1><p class="lede">A partitioned asset represents independent slices of one task—often dates, regions, or tenants. The script owns what keys mean; the CLI lets you select them explicitly.</p>
-<h2>Review before rerunning</h2><pre><code># First inspect one partition without executing asset bodies.<br>kazeflow plan daily.py --target publish_daily --partition-key 2026-08-08<br><br># Then execute exactly that reviewed selection.<br>kazeflow run daily.py --target publish_daily --partition-key 2026-08-08 --yes</code></pre>
-<h2>Select more than one partition</h2><p><code>--partition-key</code> is repeatable. It passes strings to the script's partition definition; kazeflow does not guess types or manufacture a current date.</p><pre><code>kazeflow plan daily.py --partition-key 2026-08-08 --partition-key 2026-08-09</code></pre>
-<h2>Know what selection means</h2><div class="table-wrap"><table><thead><tr><th>Input</th><th>Meaning</th></tr></thead><tbody><tr><td>Omit <code>--partition-key</code></td><td>No explicit CLI selection; the partition definition determines the work.</td></tr><tr><td>Pass one or more keys</td><td>Request those exact string values as the selection.</td></tr><tr><td>Python API empty selection</td><td>Represents no partition work when the flow supports it.</td></tr><tr><td>Falsey Python keys</td><td><code>0</code>, <code>""</code>, and <code>False</code> remain present values, not omission.</td></tr></tbody></table></div>
-<div class="callout"><strong>Plan is still a loading operation.</strong><p>Use partition review only with Python source you trust. The CLI loads the entry before it can determine valid partitions; plan does not sandbox that load.</p></div>
-<p>See the exhaustive <a href="https://github.com/kj-9/kazeflow/blob/main/docs/cli.md#select-partitions-deliberately">partition contract in the CLI guide</a>, or continue to <a href="results.html">results and history</a>.</p></main>
+<main class="shell"><div class="eyebrow">Select a slice deliberately</div><h1>Plan one date. Then run that date.</h1><p class="lede">A partitioned asset represents independent slices of one task—often dates, regions, files, or tenants. Your Python definition owns what keys mean; the CLI lets you select them explicitly.</p>
+<h2>Declare a partitioned asset</h2><pre><code>from kazeflow import DatePartitionDef, Flow, asset
+
+@asset(partition_def=DatePartitionDef())
+def publish_daily() -&gt; None:
+    print("publish the selected day")
+
+flow = Flow(["publish_daily"])</code></pre><p>An unpartitioned asset runs once. A partitioned asset creates one attempt per selected key. When dependencies are partitioned, kazeflow keeps attempts and their terminal status distinct.</p>
+<h2>Review before rerunning</h2><pre><code># Inspect one partition without executing asset bodies.
+kazeflow plan daily.py --target publish_daily --partition-key 2026-08-08
+
+# Execute exactly that selected key after explicit approval.
+kazeflow run daily.py --target publish_daily --partition-key 2026-08-08 --yes</code></pre><p>Repeat the same entry, target, partition, and concurrency options when moving from a separate plan command to run. The run command also plans again in the same process before asking for approval.</p>
+<h2>Select more than one partition</h2><pre><code>kazeflow plan daily.py \
+  --partition-key 2026-08-08 \
+  --partition-key 2026-08-09</code></pre><p><code>--partition-key</code> (or <code>--partition</code>) is repeatable. CLI values are strings passed to the script's partition definition; kazeflow does not guess a type or manufacture today's date.</p>
+<h2>Know what selection means</h2><div class="table-wrap"><table><thead><tr><th>Input</th><th>Meaning</th></tr></thead><tbody><tr><td>Omit <code>--partition-key</code></td><td>No explicit CLI selection; the partition definition determines the planned work.</td></tr><tr><td>Pass one or more keys</td><td>Request those exact textual values from the partition definition.</td></tr><tr><td>Python API empty selection</td><td>An explicit empty tuple represents no partition work when the flow supports it.</td></tr><tr><td>Falsey Python keys</td><td><code>0</code>, <code>""</code>, and <code>False</code> remain present values, not omission.</td></tr></tbody></table></div>
+<h2>Review attempts without leaking keys</h2><p>The in-memory Python <code>RunResult</code> can retain the real partition key and output for the caller. CLI JSON, <code>RunResult.to_record()</code>, and SQLite records keep only whether a partition was present. They retain attempt order, status, timing, skip reason, dependency blockers, and portable failure metadata without persisting raw keys.</p><p>A failed partition can coexist with successful independent partitions. Inspect attempt-level status with text <code>--verbose</code> or the in-memory Python result when that distinction matters.</p>
+<div class="callout"><strong>Plan is still a loading operation.</strong><p>The CLI must load trusted Python before it can ask the partition definition which keys are valid. Planning does not invoke decorated asset bodies, but it does not sandbox the import.</p></div>
+<p>Next, learn how to <a href="results.html">read and retain results</a>, or return to the complete <a href="cli.html">CLI reference</a>.</p></main>
 <footer><div class="shell"><p>Need the dependency graph first? <a href="cli.html">Open CLI and graph output</a>.</p></div></footer></body></html>

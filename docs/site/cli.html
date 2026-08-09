@@ -1,26 +1,37 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CLI and graphs — kazeflow</title><link rel="stylesheet" href="styles.css"></head>
 <body><header><div class="shell topbar"><a class="brand" href="index.html">kaze<span>flow</span></a><nav aria-label="Primary navigation"><a href="index.html">Overview</a><a href="getting-started.html">Get started</a><a aria-current="page" href="cli.html">CLI &amp; graphs</a><a href="partitions.html">Partitions</a><a href="results.html">Results &amp; history</a></nav></div></header>
-<main class="shell"><div class="eyebrow">Review from the terminal</div><h1>Inspect what will run.</h1><p class="lede">The CLI is a thin review layer over a normal Python script. It offers human-readable text and a stable JSON boundary for automation.</p>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Use it for</th></tr></thead><tbody><tr><td><code>kazeflow assets ENTRY</code></td><td>List assets discovered while loading a trusted script.</td></tr><tr><td><code>kazeflow plan ENTRY</code></td><td>Review targets, dependency order, configuration, and graph.</td></tr><tr><td><code>kazeflow run ENTRY</code></td><td>Review a preflight, then explicitly execute the selected work.</td></tr><tr><td><code>kazeflow runs …</code></td><td>List, show, or compare explicitly stored runs.</td></tr></tbody></table></div>
-<h2>Start with a plan</h2><pre><code>kazeflow plan daily.py
-kazeflow plan daily.py --target publish
-kazeflow plan daily.py --format json</code></pre><p>Pass a bare <code>.py</code> file when it exports <code>flow</code>, or use an explicit entry such as <code>package.module:flow</code>. If a bare script has no <code>flow</code>, kazeflow derives its terminal discovered assets.</p>
-<h2>Choose the graph that fits the review</h2><pre><code># Read the concise graph in a terminal.
+<main class="shell"><div class="eyebrow">Complete command reference</div><h1>Inspect what will run.</h1><p class="lede">The zero-dependency CLI is a review layer over normal Python. Text is for people; JSON is the stable automation boundary.</p>
+<h2>Commands</h2><div class="table-wrap"><table><thead><tr><th>Command</th><th>Use it for</th></tr></thead><tbody><tr><td><code>kazeflow assets ENTRY</code></td><td>List assets discovered while loading a trusted entry.</td></tr><tr><td><code>kazeflow plan ENTRY</code></td><td>Review targets, dependency order, partition selection, configuration, and graph without invoking asset bodies.</td></tr><tr><td><code>kazeflow run ENTRY</code></td><td>Review a preflight, explicitly approve, execute, and print the terminal result.</td></tr><tr><td><code>kazeflow runs list</code></td><td>List records in an existing local SQLite store.</td></tr><tr><td><code>kazeflow runs show RUN_ID</code></td><td>Show one portable stored record.</td></tr><tr><td><code>kazeflow runs compare LEFT RIGHT</code></td><td>Compare portable run and task aggregates.</td></tr></tbody></table></div>
+<h2>Entry forms and asset discovery</h2><pre><code>kazeflow assets daily.py
+kazeflow plan daily.py:flow
+kazeflow plan package.module:flow
+kazeflow run package.module:make_flow --yes</code></pre><p>A bare <code>.py</code> file prefers its module-level <code>flow</code>. Without one, kazeflow uses assets registered while that file loads and derives all terminal assets as default targets. An explicit attribute can be a <code>Flow</code> or a zero-argument factory returning one; factories are never guessed implicitly.</p>
+<h2>Plan options</h2><pre><code>kazeflow plan ENTRY \
+  [--target NAME ...] [--partition-key KEY ...] \
+  [--max-concurrency N] [--verbose] \
+  [--format text|json|mermaid|dot]</code></pre><p><code>--target</code> and <code>--partition-key</code> are repeatable. <code>--verbose</code> is text-only. The JSON projection is deliberately lossy and never exposes raw partition-key objects. Use JSON rather than parsing text whitespace.</p>
+<h2>Choose the graph that fits the review</h2><pre><code># Concise graph in the terminal.
 kazeflow plan daily.py
 
 # Paste into GitHub Markdown or another Mermaid renderer.
 kazeflow plan daily.py --format mermaid
 
-# Use an external Graphviz renderer when you want a laid-out image.
-kazeflow plan daily.py --format dot &gt; flow.dot</code></pre><p>A Mermaid command produces directly readable graph text:</p><pre><code>$ kazeflow plan daily.py --format mermaid
+# Render later with an external Graphviz tool.
+kazeflow plan daily.py --format dot &gt; flow.dot</code></pre><p>Mermaid output is readable graph source:</p><pre><code>$ kazeflow plan daily.py --format mermaid
 flowchart LR
     task_0["fetch"]
     task_1["publish (target)"]
-    task_0 --&gt; task_1</code></pre><p>kazeflow deliberately does not install or invoke Mermaid or Graphviz. JSON is the right format for programs; text, Mermaid, and DOT are review projections.</p>
-<h2>Run and result output</h2><pre><code>kazeflow run daily.py
-kazeflow run daily.py --yes --verbose
-kazeflow run daily.py --yes --format json</code></pre><p>Text lists task status and duration. <code>--verbose</code> adds safe attempt-level detail. JSON writes one portable result document to standard output; progress and diagnostics remain on standard error.</p>
-<div class="callout"><strong>Loading is part of trust.</strong><p>Entry resolution imports Python code and can have top-level side effects. Do not point the CLI at untrusted code. <code>plan</code> guarantees that asset bodies are not invoked after entry loading, not that importing is harmless.</p></div>
-<p>Full options and exit statuses: <a href="https://github.com/kj-9/kazeflow/blob/main/docs/cli.md">CLI guide</a>.</p></main>
-<footer><div class="shell"><p>Next: <a href="partitions.html">select partitions deliberately</a>.</p></div></footer></body></html>
+    task_0 --&gt; task_1</code></pre><p>kazeflow does not install or invoke Mermaid or Graphviz. These outputs always describe the same resolved plan as text and JSON.</p>
+<h2>Run options and approval</h2><pre><code>kazeflow run ENTRY \
+  [--target NAME ...] [--partition-key KEY ...] \
+  [--max-concurrency N] [--yes] [--tui] [--store PATH] \
+  [--verbose] [--format text|json]</code></pre><p><code>run</code> writes its preflight to standard error before any asset body runs. When input and error streams are terminals it asks <code>Proceed? [y/N]</code>; only <code>y</code> or <code>yes</code> proceeds. Declining is a successful no-op. Non-interactive execution requires <code>--yes</code>.</p><p>JSON mode writes exactly one portable result to standard output after a terminal run; preflight, prompt, TUI progress, and diagnostics stay on standard error. <code>--verbose</code> adds safe attempt detail in text mode only.</p>
+<h2>Optional adapters</h2><pre><code>pip install "kazeflow[tui]"
+kazeflow run daily.py --tui
+kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3</code></pre><p><code>--tui</code> lazily loads Rich and shows plan-aware progress on standard error. <code>--store</code> initializes the chosen SQLite database only after a terminal result exists. Neither adapter is imported on the default core path. Adapter failure is an infrastructure failure and takes precedence over an asset-failure exit status.</p>
+<h2>Exit statuses</h2><div class="table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td><code>0</code></td><td>Successful inspection or run, including deliberately declined confirmation.</td></tr><tr><td><code>1</code></td><td>A confirmed run completed with an asset failure.</td></tr><tr><td><code>2</code></td><td>Invalid syntax/configuration, missing non-interactive <code>--yes</code>, ambiguous selection, or unknown stored run ID.</td></tr><tr><td><code>3</code></td><td>The entry could not be loaded or resolved.</td></tr><tr><td><code>4</code></td><td>Execution infrastructure, TUI, store, or history database failed.</td></tr></tbody></table></div><p>Errors and diagnostics use standard error. Failed configuration, loading, or infrastructure produces no successful JSON document.</p>
+<h2>Compatibility and scope</h2><p>Documented commands, options, exit statuses, and JSON schemas are public CLI interfaces. Human text can improve in layout while preserving meaning. The CLI adds no scheduler, daemon, remote execution, cache, sandbox, or automatic approval.</p>
+<div class="callout"><strong>Loading is part of trust.</strong><p>Entry resolution executes Python import-time code and an explicitly selected factory. <code>assets</code> and <code>plan</code> do not invoke decorated asset bodies after loading, but they do not make untrusted Python safe. Review the source and environment first.</p></div>
+<p>Continue with <a href="partitions.html">partition selection</a> or <a href="results.html">result and history review</a>.</p></main>
+<footer><div class="shell"><p>Start over with the <a href="getting-started.html">first reviewed run</a>.</p></div></footer></body></html>
