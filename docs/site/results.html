@@ -4,7 +4,17 @@
 <main class="shell"><div class="eyebrow">Review after execution</div><h1>See the outcome, then keep only what you choose.</h1><p class="lede">A completed text run tells you each task's terminal status and duration. A structured result is also returned to Python. Storage is always an explicit opt-in.</p>
 <h2>Read a result in the terminal</h2><pre><code>kazeflow run daily.py --yes<br>kazeflow run daily.py --yes --verbose</code></pre><p>The normal text summary includes the run ID, overall status, duration, and each task's status. Failed tasks include portable error type and message; skipped tasks include a reason. <code>--verbose</code> adds attempt-level detail without showing raw partition keys, outputs, exception objects, or tracebacks.</p>
 <h2>Save a run only when you request it</h2><pre><code>kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3</code></pre><p>Without <code>--store</code>, kazeflow does not create a database. With it, the CLI writes the terminal portable record after the run completes.</p>
-<h2>Find, inspect, and compare stored runs</h2><pre><code># The default read location is ./.kazeflow/runs.sqlite3<br>kazeflow runs list<br>kazeflow runs show RUN_ID<br>kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID<br><br># Or select a store explicitly.<br>kazeflow runs list --store path/to/runs.sqlite3</code></pre><p>Use <code>--format json</code> when another tool needs a stable single-document result. Text output is for human review; it can evolve while preserving its documented meaning.</p>
+<h2>Find, inspect, and compare stored runs</h2><pre><code># The default read location is ./.kazeflow/runs.sqlite3<br>kazeflow runs list<br>kazeflow runs show RUN_ID<br>kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID<br><br># Or select a store explicitly.<br>kazeflow runs list --store path/to/runs.sqlite3</code></pre><p>A successful list and show begin like this:</p><pre><code>$ kazeflow runs list
+Stored runs:
+- &lt;run-id&gt; (success; saved_at: &lt;timestamp&gt;; schema: 1)
+
+$ kazeflow runs show &lt;run-id&gt;
+Stored run:
+- run_id: &lt;run-id&gt;
+- status: success
+- saved_at: &lt;timestamp&gt;
+Portable record:
+{ ... }</code></pre><p>Run IDs and timestamps vary. <code>runs show</code> continues with the complete portable record; use <code>--format json</code> when another tool needs a stable single-document result. Text output is for human review; it can evolve while preserving its documented meaning.</p>
 <div class="callout"><strong>Portable by design.</strong><p>Stored and JSON records intentionally omit raw asset output, exception objects, and raw partition-key values. This keeps a result useful to inspect without pretending arbitrary Python values are safe or portable records.</p></div>
 <p>More detail: <a href="https://github.com/kj-9/kazeflow/blob/main/docs/sqlite-run-store.md">SQLite run store guide</a> and <a href="https://github.com/kj-9/kazeflow/blob/main/docs/cli.md#run-history">CLI history reference</a>.</p></main>
 <footer><div class="shell"><p>Return to the <a href="index.html">documentation overview</a>.</p></div></footer></body></html>

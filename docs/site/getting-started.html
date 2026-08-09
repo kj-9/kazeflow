@@ -16,9 +16,27 @@ def publish(fetch: str) -&gt; None:
     print(fetch)
 
 flow = Flow(["publish"])</code></pre></div></section>
-<section class="step"><b>3</b><div><h2>Inspect before execution</h2><p>This shows the selected target, dependency order, and graph without calling either asset body.</p><pre><code>kazeflow plan daily.py</code></pre></div></section>
-<section class="step"><b>4</b><div><h2>Run only after an explicit decision</h2><p>In a terminal, review the preflight and answer <code>y</code>. In CI or a pipe, pass <code>--yes</code>.</p><pre><code>kazeflow run daily.py
-kazeflow run daily.py --yes</code></pre></div></section>
+<section class="step"><b>3</b><div><h2>Inspect before execution</h2><p>This shows the selected target, dependency order, and graph without calling either asset body.</p><pre><code>$ kazeflow plan daily.py
+Plan: publish
+2 assets · no partition selection · default concurrency
+Graph:
+  fetch
+  fetch --&gt; publish *</code></pre><p>The <code>*</code> marks the selected target. This is a representative text review: no asset body has run.</p></div></section>
+<section class="step"><b>4</b><div><h2>Run only after an explicit decision</h2><p>In a terminal, review the preflight and answer <code>y</code>. In CI or a pipe, pass <code>--yes</code>.</p><pre><code>$ kazeflow run daily.py
+Planned run:
+Plan: publish
+2 assets · no partition selection · default concurrency
+Graph:
+  fetch
+  fetch --&gt; publish *
+Proceed? [y/N] y
+Run result:
+- run_id: &lt;run-id&gt;
+- status: success
+- duration: &lt;duration&gt;
+Tasks:
+- ✓ fetch (success; &lt;duration&gt;)
+- ✓ publish (success; &lt;duration&gt;)</code></pre><p><code>run_id</code> and durations vary each time. Text is for review; use <code>--format json</code> when another program needs a stable record.</p></div></section>
 <section class="step"><b>5</b><div><h2>Read or retain the result</h2><p>Text output summarizes every task. Add <code>--store</code> to retain a portable result record, then inspect it later.</p><pre><code>kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3
 kazeflow runs list
 kazeflow runs show RUN_ID</code></pre></div></section>

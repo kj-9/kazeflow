@@ -13,7 +13,11 @@ kazeflow plan daily.py
 kazeflow plan daily.py --format mermaid
 
 # Use an external Graphviz renderer when you want a laid-out image.
-kazeflow plan daily.py --format dot &gt; flow.dot</code></pre><p>kazeflow deliberately does not install or invoke Mermaid or Graphviz. JSON is the right format for programs; text, Mermaid, and DOT are review projections.</p>
+kazeflow plan daily.py --format dot &gt; flow.dot</code></pre><p>A Mermaid command produces directly readable graph text:</p><pre><code>$ kazeflow plan daily.py --format mermaid
+flowchart LR
+    task_0["fetch"]
+    task_1["publish (target)"]
+    task_0 --&gt; task_1</code></pre><p>kazeflow deliberately does not install or invoke Mermaid or Graphviz. JSON is the right format for programs; text, Mermaid, and DOT are review projections.</p>
 <h2>Run and result output</h2><pre><code>kazeflow run daily.py
 kazeflow run daily.py --yes --verbose
 kazeflow run daily.py --yes --format json</code></pre><p>Text lists task status and duration. <code>--verbose</code> adds safe attempt-level detail. JSON writes one portable result document to standard output; progress and diagnostics remain on standard error.</p>

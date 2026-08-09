@@ -20,6 +20,11 @@ REQUIRED_INDEX_TEXT = (
     "Run your first flow",
     "Trust boundary.",
 )
+REQUIRED_TRANSCRIPT_TEXT = {
+    "getting-started.html": ("Planned run:", "Proceed? [y/N] y", "Run result:"),
+    "cli.html": ("flowchart LR", 'task_1["publish (target)"]'),
+    "results.html": ("Stored runs:", "Portable record:"),
+}
 
 
 class _LinkCollector(HTMLParser):
@@ -88,6 +93,17 @@ def main() -> int:
             f"{index}: missing required landing text: {text!r}"
             for text in REQUIRED_INDEX_TEXT
             if text not in index_source
+        )
+
+    for page_name, expected_text in REQUIRED_TRANSCRIPT_TEXT.items():
+        page = site_root / page_name
+        if not page.is_file():
+            continue
+        source = page.read_text(encoding="utf-8")
+        errors.extend(
+            f"{page}: missing required transcript text: {text!r}"
+            for text in expected_text
+            if text not in source
         )
 
     if errors:
