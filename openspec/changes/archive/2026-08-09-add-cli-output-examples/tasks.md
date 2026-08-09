@@ -11,5 +11,5 @@
   labels and run the static-site validation.
 - [x] 2.2 Run `make test`, `make ci-check`, OpenSpec strict validation, and diff
   checks; deploy the documented change through the existing Pages workflow.
-- [ ] 2.3 Sync the hosted-documentation spec and archive the change after the
+- [x] 2.3 Sync the hosted-documentation spec and archive the change after the
   deployed site is verified.
