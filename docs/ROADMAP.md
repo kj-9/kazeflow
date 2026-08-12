@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M13 Complete
+> Status: M0–M13 Complete; M14 in progress
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -38,6 +38,29 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M11: public CLI compatibility、plan graph projection、plan-aware TUI progress、wheel release checksを実装し、archive済み。
 - M12: 実行結果のreview projectionとPartitionのユーザー導線を実装済み。
 - M13: GitHub Pagesをユーザー向けdocumentationの正本として公開し、repository内の重複guideを集約済み。
+
+### M14: Build a searchable software documentation system
+
+OpenSpec change: `migrate-pages-to-mkdocs`
+
+手書きHTMLの案内サイトを、Markdownを正本とするMkDocs Material siteへ移行する。
+ユーザーがtutorial、guide、concept、CLI/Python reference、exampleを目的別に検索・移動できる
+Software Docsとして整備する。
+
+対象:
+
+- search、階層sidebar、page TOC、permalink、code copy、responsive navigation
+- getting-started、task guide、concept、CLI reference、Python API、example、release情報の分離
+- mkdocstringsによる選択的なpublic Python API reference
+- frozenなdocs-only dependenciesを使うstrict CI buildとGitHub Pages deployment
+- 既存の公開top-level URLとzero-runtime-dependency coreの維持
+
+完了条件:
+
+- mobile/desktopのどちらでもglobal/local navigationと本文が利用できる。
+- CLI command/optionとpublic Python signatureをsite searchと階層navigationから発見できる。
+- `mkdocs build --strict`が成功し、generated artifactだけがPagesへdeployされる。
+- wheel metadataにMkDocs、Material、mkdocstringsがruntime dependencyとして含まれない。
 
 ### M12: Make post-run review and partitions understandable
 

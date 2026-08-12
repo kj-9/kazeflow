@@ -1,4 +1,4 @@
-.PHONY: format lint typecheck test check build package-check
+.PHONY: format lint typecheck test docs-check check build package-check
 
 UV_RUN=uv run --frozen
 UV_RUN_TUI=$(UV_RUN) --extra tui
@@ -15,6 +15,10 @@ typecheck:
 
 test:
 	$(UV_RUN_TUI) pytest
+
+docs-check:
+	$(UV_RUN) --group docs mkdocs build --strict
+	$(UV_RUN) python scripts/check_docs_build.py build/docs-site
 
 ci-check:
 	$(UV_RUN) ruff format . --check

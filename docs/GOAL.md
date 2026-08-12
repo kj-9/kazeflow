@@ -147,8 +147,8 @@ kazeflowがゴールに沿っているかを、少なくとも次の基準で判
 
 ユーザー向けの導入、利用方法、CLI referenceは
 [GitHub Pages](https://kj-9.github.io/kazeflow/)をsingle source of truthとする。
-READMEはpackageの概要と最短exampleからPagesへ案内する入口に留め、同じ利用ガイドを
-repository Markdownへ複製しない。
+Pagesは`docs/user/`のMarkdownからMkDocsで生成する。READMEはpackageの概要と最短exampleから
+Pagesへ案内する入口に留め、同じ利用ガイドを別のrepository Markdownへ複製しない。
 
 このファイルはproject goal、設計原則、non-goalsのsingle source of truthとする。
 Pagesの利用ガイドとは対象読者と更新理由を分離する。

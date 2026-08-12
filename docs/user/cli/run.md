@@ -1,0 +1,42 @@
+# `kazeflow run`
+
+Plan a trusted entry, show the preflight, require an explicit decision, execute the
+selected asset bodies, and emit the terminal result.
+
+## Synopsis
+
+```console
+kazeflow run ENTRY \
+  [--target NAME ...] [--partition-key KEY ...] \
+  [--max-concurrency N] [--yes] [--tui] [--store PATH] \
+  [--verbose] [--format text|json]
+```
+
+## Confirmation
+
+When standard input and standard error are terminals, `run` asks
+`Proceed? [y/N]`; only `y` or `yes` proceeds. Declining is a successful no-op and
+initializes neither assets, TUI, store, nor `RunResult`.
+
+Non-interactive execution requires `--yes`:
+
+```console
+kazeflow run daily.py --yes
+```
+
+## Result modes
+
+Text prints the run ID, status, duration, and each task outcome. `--verbose` adds
+safe attempt-level detail. `--format json` writes one portable result document to
+standard output while preflight and diagnostics remain on standard error.
+
+## Optional adapters
+
+```console
+kazeflow run daily.py --tui
+kazeflow run daily.py --yes --store .kazeflow/runs.sqlite3
+```
+
+The Rich TUI is loaded before execution only when requested. The SQLite store is
+opened after a terminal result exists. A requested adapter failure is infrastructure
+failure and takes precedence over an asset-failure process status.

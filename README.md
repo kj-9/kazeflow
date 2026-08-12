@@ -46,6 +46,7 @@ kazeflow run daily.py --yes # explicit approval for CI or a pipe
 The complete user documentation lives on GitHub Pages:
 
 - [Get started](https://kj-9.github.io/kazeflow/getting-started.html)
+- [Python API reference](https://kj-9.github.io/kazeflow/api/index.html)
 - [CLI and graph output](https://kj-9.github.io/kazeflow/cli.html)
 - [Partitions](https://kj-9.github.io/kazeflow/partitions.html)
 - [Results, SQLite storage, and history](https://kj-9.github.io/kazeflow/results.html)

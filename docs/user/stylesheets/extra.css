@@ -1,0 +1,82 @@
+[data-md-color-scheme="kazeflow-light"] {
+  --md-default-fg-color: #17202a;
+  --md-default-fg-color--light: #52616b;
+  --md-default-bg-color: #fbfaf7;
+  --md-primary-fg-color: #0f6a67;
+  --md-primary-fg-color--light: #188984;
+  --md-primary-fg-color--dark: #084b49;
+  --md-accent-fg-color: #0f6a67;
+  --md-code-bg-color: #14211f;
+  --md-code-fg-color: #e6f3ec;
+}
+
+.md-header__title {
+  font-weight: 750;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset .hero {
+  max-width: 52rem;
+  padding: 2.5rem 0 1rem;
+}
+
+.md-typeset .hero h1 {
+  margin-bottom: 0.5rem;
+  font-size: clamp(2.5rem, 6vw, 4.7rem);
+  line-height: 1.08;
+}
+
+.md-typeset .hero p {
+  max-width: 46rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 1.1rem;
+}
+
+.md-typeset .release-badge {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--md-primary-fg-color) 45%, transparent);
+  border-radius: 999px;
+  color: var(--md-primary-fg-color--dark);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-color: color-mix(in srgb, var(--md-default-fg-color) 14%, transparent);
+  border-radius: 0.55rem;
+}
+
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-color: #d5a83f;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: 78rem;
+  }
+}
+
+@media screen and (max-width: 37.5em) {
+  .md-typeset .hero {
+    padding-top: 1.5rem;
+  }
+
+  .md-typeset .hero h1 {
+    font-size: 2.2rem;
+  }
+}

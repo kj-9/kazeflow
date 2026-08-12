@@ -3,14 +3,20 @@ name: Publish documentation site
 on:
   pull_request:
     paths:
-      - "docs/site/**"
-      - "scripts/check_docs_site.py"
+      - "docs/user/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "scripts/check_docs_build.py"
+      - "uv.lock"
       - ".github/workflows/pages.yml"
   push:
     branches: [main]
     paths:
-      - "docs/site/**"
-      - "scripts/check_docs_site.py"
+      - "docs/user/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "scripts/check_docs_build.py"
+      - "uv.lock"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -26,14 +32,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Validate static documentation site
-        run: python scripts/check_docs_site.py docs/site
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Build documentation strictly
+        run: uv run --frozen --group docs mkdocs build --strict
+      - name: Check generated documentation contract
+        run: uv run --frozen python scripts/check_docs_build.py build/docs-site
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs/site
+          path: build/docs-site
 
   deploy:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
