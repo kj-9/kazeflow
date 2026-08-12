@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kj-9.github.io/kazeflow/schemas/cli/v1/schema.json",
+  "title": "kazeflow CLI JSON documents, version 1",
+  "description": "The normative schema for completed kazeflow CLI JSON documents. Object member order is not significant; array order follows the command contract.",
+  "oneOf": [
+    { "$ref": "#/$defs/assetsDocument" },
+    { "$ref": "#/$defs/partitionsDocument" },
+    { "$ref": "#/$defs/planDocument" },
+    { "$ref": "#/$defs/runResultDocument" },
+    { "$ref": "#/$defs/runDeclinedDocument" },
+    { "$ref": "#/$defs/runsListDocument" },
+    { "$ref": "#/$defs/runsShowDocument" },
+    { "$ref": "#/$defs/runsCompareDocument" }
+  ],
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "duration": { "type": "number", "minimum": 0 },
+    "identifier": { "type": "string", "minLength": 1 },
+    "flowStatus": { "type": "string", "enum": ["success", "failed", "cancelled"] },
+    "attemptStatus": { "type": "string", "enum": ["success", "failed", "skipped", "cancelled"] },
+    "skipReason": { "type": "string", "enum": ["dependency_blocked", "no_partition_keys"] },
+    "taskReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_name"],
+      "properties": { "task_name": { "$ref": "#/$defs/identifier" } }
+    },
+    "attemptReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "partition"],
+      "properties": {
+        "task": { "$ref": "#/$defs/taskReference" },
+        "partition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present"],
+          "properties": { "present": { "type": "boolean" } }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "description": "Portable failure metadata. Values are application-controlled and are not redacted.",
+      "additionalProperties": false,
+      "required": ["exception_type", "message", "traceback"],
+      "properties": {
+        "exception_type": { "type": "string" },
+        "message": { "type": "string" },
+        "traceback": { "type": "string" }
+      }
+    },
+    "attemptResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempt", "status", "started_at", "ended_at", "duration_seconds", "reason", "blocked_by", "failure"],
+      "properties": {
+        "attempt": { "$ref": "#/$defs/attemptReference" },
+        "status": { "$ref": "#/$defs/attemptStatus" },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "ended_at": { "$ref": "#/$defs/timestamp" },
+        "duration_seconds": { "$ref": "#/$defs/duration" },
+        "reason": { "anyOf": [{ "$ref": "#/$defs/skipReason" }, { "type": "null" }] },
+        "blocked_by": { "type": "array", "items": { "$ref": "#/$defs/attemptReference" } },
+        "failure": { "anyOf": [{ "$ref": "#/$defs/failure" }, { "type": "null" }] }
+      }
+    },
+    "taskResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "is_partitioned", "status", "started_at", "ended_at", "duration_seconds", "reason", "blocked_by", "attempts"],
+      "properties": {
+        "task": { "$ref": "#/$defs/taskReference" },
+        "is_partitioned": { "type": "boolean" },
+        "status": { "$ref": "#/$defs/attemptStatus" },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "ended_at": { "$ref": "#/$defs/timestamp" },
+        "duration_seconds": { "$ref": "#/$defs/duration" },
+        "reason": { "anyOf": [{ "$ref": "#/$defs/skipReason" }, { "type": "null" }] },
+        "blocked_by": { "type": "array", "items": { "$ref": "#/$defs/attemptReference" } },
+        "attempts": { "type": "array", "items": { "$ref": "#/$defs/attemptResult" } }
+      }
+    },
+    "portableRunRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "status", "started_at", "ended_at", "duration_seconds", "tasks"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/identifier" },
+        "status": { "$ref": "#/$defs/flowStatus" },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "ended_at": { "$ref": "#/$defs/timestamp" },
+        "duration_seconds": { "$ref": "#/$defs/duration" },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/taskResult" } }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dependencies", "partitioned"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "dependencies": { "type": "array", "items": { "$ref": "#/$defs/identifier" } },
+        "partitioned": { "type": "boolean" }
+      }
+    },
+    "partitionDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset", "definition_kind", "domain", "key_format", "supports_range"],
+      "properties": {
+        "asset": { "$ref": "#/$defs/identifier" },
+        "definition_kind": { "$ref": "#/$defs/identifier" },
+        "domain": { "$ref": "#/$defs/identifier" },
+        "key_format": { "$ref": "#/$defs/identifier" },
+        "supports_range": { "type": "boolean" }
+      }
+    },
+    "partitionSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "domain", "count"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["omitted", "keys", "range", "empty", "unpartitioned"] },
+        "domain": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] }
+      }
+    },
+    "planTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dependencies", "partition_selection"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "dependencies": { "type": "array", "items": { "$ref": "#/$defs/identifier" } },
+        "partition_selection": { "$ref": "#/$defs/partitionSelection" }
+      }
+    },
+    "storedRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "record_schema_version", "status", "saved_at", "store_schema_version", "record"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/identifier" },
+        "record_schema_version": { "type": "integer", "minimum": 1 },
+        "status": { "$ref": "#/$defs/flowStatus" },
+        "saved_at": { "$ref": "#/$defs/timestamp" },
+        "store_schema_version": { "type": "integer", "minimum": 1 },
+        "record": { "$ref": "#/$defs/portableRunRecord" }
+      }
+    },
+    "historySummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "record_schema_version", "status", "saved_at"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/identifier" },
+        "record_schema_version": { "type": "integer", "minimum": 1 },
+        "status": { "$ref": "#/$defs/flowStatus" },
+        "saved_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "taskHistorySummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["is_partitioned", "status", "reason", "attempt_count", "partitioned_attempt_count", "attempt_status_counts", "failure_present", "failure_exception_types"],
+      "properties": {
+        "is_partitioned": { "type": "boolean" },
+        "status": { "$ref": "#/$defs/attemptStatus" },
+        "reason": { "anyOf": [{ "$ref": "#/$defs/skipReason" }, { "type": "null" }] },
+        "attempt_count": { "type": "integer", "minimum": 0 },
+        "partitioned_attempt_count": { "type": "integer", "minimum": 0 },
+        "attempt_status_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 },
+          "propertyNames": { "enum": ["success", "failed", "skipped", "cancelled"] }
+        },
+        "failure_present": { "type": "boolean" },
+        "failure_exception_types": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+      }
+    },
+    "taskComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_name", "left", "right", "changed"],
+      "properties": {
+        "task_name": { "$ref": "#/$defs/identifier" },
+        "left": { "anyOf": [{ "$ref": "#/$defs/taskHistorySummary" }, { "type": "null" }] },
+        "right": { "anyOf": [{ "$ref": "#/$defs/taskHistorySummary" }, { "type": "null" }] },
+        "changed": { "type": "boolean" }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status_changed", "duration_seconds_delta", "task_count_delta", "tasks"],
+      "properties": {
+        "status_changed": { "type": "boolean" },
+        "duration_seconds_delta": { "type": "number" },
+        "task_count_delta": { "type": "integer" },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/taskComparison" } }
+      }
+    },
+    "assetsDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.assets" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["declared_flow", "assets"], "properties": { "declared_flow": { "type": "boolean" }, "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } } } }
+      }
+    },
+    "partitionsDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.partitions" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["targets", "partitions"], "properties": { "targets": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }, "partitions": { "type": "array", "items": { "$ref": "#/$defs/partitionDefinition" } } } }
+      }
+    },
+    "planDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.plan" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["targets", "config", "tasks"], "properties": { "targets": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }, "config": { "type": "object", "additionalProperties": false, "required": ["max_concurrency", "partition_selection"], "properties": { "max_concurrency": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] }, "partition_selection": { "$ref": "#/$defs/partitionSelection" } } }, "tasks": { "type": "array", "items": { "$ref": "#/$defs/planTask" } } } }
+      }
+    },
+    "runResultDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.run-result" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["record_schema_version", "record"], "properties": { "record_schema_version": { "type": "integer", "minimum": 1 }, "record": { "$ref": "#/$defs/portableRunRecord" } } }
+      }
+    },
+    "runDeclinedDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.run-declined" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["reason"], "properties": { "reason": { "const": "not_approved" } } }
+      }
+    },
+    "runsListDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.runs-list" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["runs"], "properties": { "runs": { "type": "array", "items": { "$ref": "#/$defs/historySummary" } } } }
+      }
+    },
+    "runsShowDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.runs-show" }, "schema_version": { "const": 1 }, "data": { "$ref": "#/$defs/storedRun" }
+      }
+    },
+    "runsCompareDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_type", "schema_version", "data"],
+      "properties": {
+        "document_type": { "const": "kazeflow.runs-compare" }, "schema_version": { "const": 1 },
+        "data": { "type": "object", "additionalProperties": false, "required": ["left", "right", "comparison"], "properties": { "left": { "$ref": "#/$defs/storedRun" }, "right": { "$ref": "#/$defs/storedRun" }, "comparison": { "$ref": "#/$defs/comparison" } } }
+      }
+    }
+  }
+}

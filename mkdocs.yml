@@ -108,6 +108,7 @@ nav:
       - run: cli/run.md
       - runs history: cli/history.md
       - Exit codes and automation: cli/exit-codes.md
+      - JSON automation contract: cli/json.md
   - Python API:
       - api/index.md
       - Core API: api/core.md

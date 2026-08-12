@@ -53,4 +53,5 @@ kazeflow emits graph source but does not install or invoke Mermaid or Graphviz.
 The JSON plan projection is deterministic and intentionally lossy. It reports the
 selection kind, stable domain, and safe counts rather than serializing arbitrary raw
 partition keys. Text, JSON, Mermaid, and DOT plans preserve this no-raw-key boundary.
-Use JSON instead of parsing text whitespace.
+Use JSON instead of parsing text whitespace. The typed envelope, field table, and
+schema are in the [JSON automation contract](json.md#version-1-data-fields).

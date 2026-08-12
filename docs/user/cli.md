@@ -28,9 +28,11 @@ Factories are never guessed implicitly.
 ## Output contract
 
 Human-readable text can improve in layout while preserving meaning. JSON is the
-stable automation boundary. Successful JSON modes write exactly one document to
-standard output; diagnostics, preflight, confirmation, and progress use standard
-error.
+stable automation boundary. Successful JSON modes write exactly one typed document
+to standard output; diagnostics, preflight, confirmation, progress, and ordinary
+user-Python `print()` output use standard error.
 
 See [Exit codes and automation](cli/exit-codes.md) for status precedence and
-[Trust boundary](concepts/trust-boundary.md) before loading unfamiliar source.
+[JSON automation contract](cli/json.md) for schemas, field shapes, version policy,
+and representative documents. Read the [Trust boundary](concepts/trust-boundary.md)
+before loading unfamiliar source.

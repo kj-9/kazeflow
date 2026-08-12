@@ -33,6 +33,9 @@ stored. Failure messages and tracebacks remain application-controlled and can re
 the same values; stored records are not automatically redacted. See the
 [portable-record trust boundary](../concepts/trust-boundary.md#portable-record-boundary).
 
+For the typed JSON envelopes, distinct CLI/record/store versions, schemas, and
+ordering guarantees, use the [JSON automation contract](json.md).
+
 ```console
 $ kazeflow runs list
 Stored runs:

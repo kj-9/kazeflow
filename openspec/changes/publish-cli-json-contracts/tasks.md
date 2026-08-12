@@ -14,9 +14,9 @@
 
 ## 3. Hosted automation documentation
 
-- [ ] 3.1 Publish a command-indexed JSON automation reference with the common envelope, complete version-1 field shapes, schema links, and representative outputs.
-- [ ] 3.2 Document stdout/stderr routing, the exit/document matrix, deterministic array semantics, the structural privacy boundary, and trusted-Python limitations.
-- [ ] 3.3 Publish the alpha compatibility and migration policy, including separate CLI-document, portable-record, SQLite-store, and package versions.
+- [x] 3.1 Publish a command-indexed JSON automation reference with the common envelope, complete version-1 field shapes, schema links, and representative outputs.
+- [x] 3.2 Document stdout/stderr routing, the exit/document matrix, deterministic array semantics, the structural privacy boundary, and trusted-Python limitations.
+- [x] 3.3 Publish the alpha compatibility and migration policy, including separate CLI-document, portable-record, SQLite-store, and package versions.
 
 ## 4. Integration and release evidence
 

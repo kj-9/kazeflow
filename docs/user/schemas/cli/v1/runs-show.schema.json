@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://kj-9.github.io/kazeflow/schemas/cli/v1/runs-show.schema.json","$ref":"schema.json#/$defs/runsShowDocument"}

@@ -41,6 +41,8 @@ error.
 Portable output omits dedicated raw-key fields and arbitrary task outputs, but
 failure messages and tracebacks can contain sensitive application values. See the
 [portable-record trust boundary](../concepts/trust-boundary.md#portable-record-boundary).
+For the typed envelope, separate portable-record version, schema, and exit behavior,
+see the [JSON automation contract](json.md).
 
 ## Optional adapters
 

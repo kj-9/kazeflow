@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date
 import json
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -18,6 +19,44 @@ from kazeflow.partition import PartitionDef
 @pytest.fixture(autouse=True)
 def clear_default_registry() -> None:
     default_registry.clear()
+
+
+def test_json_automation_reference_has_complete_public_contract_links() -> None:
+    docs_root = Path(__file__).parents[1] / "docs" / "user"
+    reference = (docs_root / "cli" / "json.md").read_text(encoding="utf-8")
+
+    for text in (
+        "JSON automation contract",
+        "document_type",
+        "schema_version",
+        "record_schema_version",
+        "store_schema_version",
+        "kazeflow.assets",
+        "kazeflow.partitions",
+        "kazeflow.plan",
+        "kazeflow.run-result",
+        "kazeflow.run-declined",
+        "kazeflow.runs-list",
+        "kazeflow.runs-show",
+        "kazeflow.runs-compare",
+        "Draft 2020-12",
+        "Exit and document matrix",
+        "direct file-descriptor writes",
+    ):
+        assert text in reference
+
+    for schema_name in (
+        "schema.json",
+        "assets.schema.json",
+        "partitions.schema.json",
+        "plan.schema.json",
+        "run-result.schema.json",
+        "run-declined.schema.json",
+        "runs-list.schema.json",
+        "runs-show.schema.json",
+        "runs-compare.schema.json",
+    ):
+        assert (docs_root / "schemas" / "cli" / "v1" / schema_name).is_file()
 
 
 def test_partition_selection_contract_matches_documentation(
@@ -63,7 +102,9 @@ def test_partition_selection_contract_matches_documentation(
 
     assert main(["partitions", str(entry), "--format", "json"]) == EXIT_SUCCESS
     inspection = json.loads(capsys.readouterr().out)
-    assert inspection["partitions"] == [
+    assert inspection["document_type"] == "kazeflow.partitions"
+    assert inspection["schema_version"] == 1
+    assert inspection["data"]["partitions"] == [
         {
             "asset": "daily",
             "definition_kind": "DatePartitionDef",
@@ -88,12 +129,15 @@ def test_partition_selection_contract_matches_documentation(
         == EXIT_SUCCESS
     )
     key_projection = json.loads(capsys.readouterr().out)
-    assert key_projection["config"]["partition_selection"] == {
+    assert key_projection["document_type"] == "kazeflow.plan"
+    assert key_projection["schema_version"] == 1
+    key_data = key_projection["data"]
+    assert key_data["config"]["partition_selection"] == {
         "kind": "keys",
         "domain": "date",
         "count": 1,
     }
-    assert key_projection["tasks"][0]["partition_selection"] == {
+    assert key_data["tasks"][0]["partition_selection"] == {
         "kind": "keys",
         "domain": "date",
         "count": 1,
@@ -116,7 +160,8 @@ def test_partition_selection_contract_matches_documentation(
         == EXIT_SUCCESS
     )
     range_projection = json.loads(capsys.readouterr().out)
-    assert range_projection["config"]["partition_selection"] == {
+    assert range_projection["document_type"] == "kazeflow.plan"
+    assert range_projection["data"]["config"]["partition_selection"] == {
         "kind": "range",
         "domain": "date",
         "count": 3,
@@ -128,7 +173,8 @@ def test_partition_selection_contract_matches_documentation(
         == EXIT_SUCCESS
     )
     empty_projection = json.loads(capsys.readouterr().out)
-    assert empty_projection["config"]["partition_selection"] == {
+    assert empty_projection["document_type"] == "kazeflow.plan"
+    assert empty_projection["data"]["config"]["partition_selection"] == {
         "kind": "empty",
         "domain": "date",
         "count": 0,

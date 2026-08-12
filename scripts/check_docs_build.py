@@ -16,7 +16,7 @@ REQUIRED_PAGES = {
         "RunResult",
         "not automatically redacted",
     ),
-    "cli.html": ("CLI reference", "kazeflow plan"),
+    "cli.html": ("CLI reference", "kazeflow plan", "JSON automation contract"),
     "partitions.html": (
         "configuration error",
         "DatePartitionDef",
@@ -39,6 +39,15 @@ REQUIRED_PAGES = {
     ),
     "cli/plan.html": ("--max-concurrency", "--partition-range", "mermaid"),
     "cli/run.html": ("--yes", "--empty-partitions", "--store PATH"),
+    "cli/json.html": (
+        "JSON automation contract",
+        "document_type",
+        "kazeflow.run-result",
+        "record_schema_version",
+        "store_schema_version",
+        "run-declined",
+        "Exit and document matrix",
+    ),
     "api/core.html": ("kazeflow.Flow", "kazeflow.asset", "kazeflow.PartitionDef"),
     "api/sqlite.html": ("SQLiteRunStore", "StoredRunRecord"),
     "concepts/failure-semantics.html": (
@@ -62,6 +71,9 @@ REQUIRED_SEARCH_TERMS = (
     "Trust boundary",
     "Portable-record boundary",
     "External asyncio cancellation",
+    "JSON automation contract",
+    "document_type",
+    "record_schema_version",
 )
 
 
