@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 import kazeflow.cli as cli
 from kazeflow.cli import main
@@ -81,6 +82,26 @@ def test_checked_in_goldens_validate_against_the_normative_schema() -> None:
     assert len(golden_paths) == 11
     for path in golden_paths:
         validator.validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def test_published_document_specific_schemas_resolve_the_shared_schema() -> None:
+    shared = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    registry = Registry().with_resource(shared["$id"], Resource.from_contents(shared))
+    fixtures = {
+        "assets": "assets.json",
+        "partitions": "partitions.json",
+        "plan": "plan-keys.json",
+        "run-result": "run-success.json",
+        "run-declined": "run-declined.json",
+        "runs-list": "runs-list.json",
+        "runs-show": "runs-show.json",
+        "runs-compare": "runs-compare.json",
+    }
+
+    for document_name, fixture_name in fixtures.items():
+        wrapper_path = _SCHEMA_PATH.with_name(f"{document_name}.schema.json")
+        wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+        Draft202012Validator(wrapper, registry=registry).validate(_golden(fixture_name))
 
 
 def test_v1_schemas_reject_an_incomplete_completed_document() -> None:
