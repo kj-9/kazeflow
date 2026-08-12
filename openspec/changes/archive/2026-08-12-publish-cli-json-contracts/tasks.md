@@ -22,5 +22,5 @@
 
 - [x] 4.1 Run focused CLI/schema/documentation tests, `make test`, `make ci-check`, `make docs-check`, and strict OpenSpec validation.
 - [x] 4.2 Build the distribution and run core-only plus optional-TUI wheel smoke tests across the supported packaging checks.
-- [ ] 4.3 Perform an adversarial implementation review, resolve contract or regression findings, and record verification evidence.
-- [ ] 4.4 Mark tasks complete, sync/archive the OpenSpec change serially, update M17 roadmap status, and commit/push the completed milestone in reviewable units.
+- [x] 4.3 Perform an adversarial implementation review, resolve contract or regression findings, and record verification evidence.
+- [x] 4.4 Mark tasks complete, sync/archive the OpenSpec change serially, update M17 roadmap status, and commit/push the completed milestone in reviewable units.

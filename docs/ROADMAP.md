@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M16 Complete; M17 planned
+> Status: M0–M17 Complete; M18 planned
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -41,6 +41,7 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M14: GitHub Pagesを検索可能なMkDocs Material siteへ移行し、task guide、concept、CLI/Python reference、exampleを分離して公開済み。
 - M15: Partition、portable record、external cancellationの公開説明を現行契約へ修正し、behavioral evidenceと初回環境診断を追加済み。
 - M16: definition-ownedなPartition key正規化、strict date/range selection、domain互換性検証、非実行inspection CLIを実装済み。
+- M17: typed CLI JSON envelope、公開JSON Schema、golden compatibility evidence、JSON stream分離を実装済み。
 
 ## Next direction: Make documentation trustworthy by construction
 
@@ -114,7 +115,7 @@ Non-goals:
 
 ### M17: Define versioned machine-readable CLI contracts
 
-想定OpenSpec change: `publish-cli-json-contracts`
+OpenSpec change: `publish-cli-json-contracts`
 
 automation consumerがtext出力を解析せず、安全にversionを判定できるnormativeなJSON契約を定義する。
 互換性を実装していない部分については、契約を追加するか、公開promiseを狭めるかを先に決める。
