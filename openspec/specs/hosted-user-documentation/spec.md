@@ -163,27 +163,29 @@ existing top-level getting-started, CLI, partition, and result/history page URLs
   without requiring a repository Markdown fallback
 
 ### Requirement: Truthful current Partition guidance
-The hosted documentation SHALL state that current planning requires an explicit
-partition-key selection whenever the selected dependency closure contains a
-partitioned task. It MUST distinguish `DatePartitionDef.range()` as a Python helper
-from CLI key parsing or validation and MUST NOT claim that a Partition definition
-implicitly chooses work, validates CLI strings, or manufactures a current date.
+The hosted documentation SHALL state that planning requires an explicit selection
+whenever the selected dependency closure contains a partitioned task. It SHALL
+explain that the partition definition normalizes or rejects selected keys before
+asset execution; `DatePartitionDef` accepts strict ISO `YYYY-MM-DD` CLI keys and
+provides an explicit inclusive bounded range. It SHALL demonstrate repeated keys,
+bounded range selection, and deliberate empty selection separately and MUST NOT
+claim that a definition implicitly chooses today, all history, or unbounded work.
 
 #### Scenario: User omits a required Partition selection
-- **WHEN** a user follows the hosted guidance for a partitioned flow without passing
-  a Partition selection
-- **THEN** the documentation predicts a configuration error before any asset body
-  runs and shows how to provide an explicit key
+- **WHEN** a user follows the hosted guidance for a partitioned flow without passing a Partition selection
+- **THEN** the documentation predicts a configuration error before any asset body runs and shows how to choose an explicit selection form
 
 #### Scenario: User supplies a textual CLI key
-- **WHEN** a user supplies `--partition-key VALUE`
-- **THEN** the documentation describes the current CLI value as an explicitly
-  selected string and does not imply definition-owned parsing or validation
+- **WHEN** a user supplies `--partition-key 2026-08-11` to a date-partitioned flow
+- **THEN** the documentation predicts strict validation and normalization to an in-memory date before execution
 
 #### Scenario: User needs a date range in Python
-- **WHEN** a user needs several date keys through the Python API
-- **THEN** the documentation demonstrates `DatePartitionDef.range()` separately and
-  passes its returned keys explicitly in run configuration
+- **WHEN** a user needs several consecutive date keys
+- **THEN** the documentation demonstrates an explicit inclusive range in both CLI and Python without implying an unbounded catalog
+
+#### Scenario: User deliberately selects no partition work
+- **WHEN** a user wants to review or execute an empty selection
+- **THEN** the documentation distinguishes the explicit empty selector and its skipped no-work result from omitted configuration
 
 ### Requirement: Precise portable-record sensitivity boundary
 The hosted documentation SHALL distinguish omission of dedicated raw output,
