@@ -28,6 +28,7 @@ prerelease = "explicit"
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.25,<5",
     "ruff>=0.13.0",
     "pytest>=8.4.2",
     "ty==0.0.1a20",
