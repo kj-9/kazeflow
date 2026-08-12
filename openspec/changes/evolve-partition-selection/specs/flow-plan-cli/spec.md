@@ -32,6 +32,10 @@ a usage error rather than silently ignoring it.
 - **WHEN** a caller supplies `--empty-partitions` for a partitioned closure
 - **THEN** `plan` distinguishes explicit empty selection from omitted selection
 
+#### Scenario: Run the reviewed normalized selection
+- **WHEN** a caller approves a preflight plan produced by a stateful custom definition
+- **THEN** `run` executes that exact normalized plan without parsing, normalizing, or expanding its selection again
+
 #### Scenario: Conflicting or irrelevant selectors are rejected
 - **WHEN** a caller combines selection forms or selects partitions for an unpartitioned closure
 - **THEN** the CLI writes a diagnostic to stderr, leaves stdout empty, exits with status `2`, and invokes no asset body
@@ -47,4 +51,3 @@ execution, or a mandatory third-party runtime dependency.
 #### Scenario: Use core-only inspection
 - **WHEN** an installation has no optional extras
 - **THEN** `assets`, `partitions`, and `plan` remain available
-

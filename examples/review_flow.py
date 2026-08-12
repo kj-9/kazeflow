@@ -16,20 +16,20 @@ from kazeflow import (
 )
 
 
-PARTITIONS = ("north", "south")
+PARTITIONS = ("2026-08-11", "2026-08-12")
 
 
 @asset(partition_def=DatePartitionDef())
 def collect(context: AssetContext) -> str:
-    if context.partition_key == "south":
+    if str(context.partition_key) == "2026-08-12":
         raise ValueError("source data is unavailable")
     return f"raw-{context.partition_key}"
 
 
 @asset(partition_def=DatePartitionDef())
-def publish(collect: dict[str, str], context: AssetContext) -> str:
+def publish(collect: dict[object, str], context: AssetContext) -> str:
     partition_key = context.partition_key
-    assert isinstance(partition_key, str)
+    assert partition_key is not None
     return collect[partition_key].upper()
 
 
@@ -46,11 +46,13 @@ def review(plan: FlowPlan) -> None:
     # Replace these expected values with the reviewer-approved flow definition.
     assert plan.targets == ("publish",)
     assert plan.config.max_concurrency == 2
-    assert plan.config.partition_keys == PARTITIONS
+    assert tuple(map(str, plan.config.partition_keys or ())) == PARTITIONS
     assert [task.name for task in plan.tasks] == ["collect", "publish"]
     assert plan.tasks[0].dependencies == ()
     assert plan.tasks[1].dependencies == ("collect",)
-    assert all(task.partition_keys == PARTITIONS for task in plan.tasks)
+    assert all(
+        tuple(map(str, task.partition_keys or ())) == PARTITIONS for task in plan.tasks
+    )
 
 
 def inspect_result(result: RunResult) -> None:

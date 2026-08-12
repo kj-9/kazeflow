@@ -15,6 +15,20 @@ kazeflow separates execution information by when and why it is used.
 invoking asset bodies. The CLI must first import a Python entry to obtain the flow;
 that loading boundary is separate from planning.
 
+## Partition selection is normalized configuration
+
+For a partitioned closure, a `FlowPlan` records one explicit selection form: keys,
+an inclusive bounded range, or deliberate empty work. The involved definitions must
+share a stable domain, and each definition normalizes the supplied input before
+attempts exist. An omitted selection, invalid date, reversed range, incompatible
+domain, duplicate normalized key, or selector on unpartitioned work fails during
+preflight.
+
+The plan exposes selection kind, domain, and safe counts in portable presentation;
+it does not expose arbitrary selected key values. See [Select partitions
+deliberately](../partitions.md) for the command forms and the distinction between
+empty work and missing configuration.
+
 ## Results are structured values
 
 Asset failures normally appear in a terminal `RunResult` rather than being raised to

@@ -7,7 +7,8 @@ selected asset bodies, and emit the terminal result.
 
 ```console
 kazeflow run ENTRY \
-  [--target NAME ...] [--partition-key KEY ...] \
+  [--target NAME ...] \
+  [--partition-key KEY ... | --partition-range START END | --empty-partitions] \
   [--max-concurrency N] [--yes] [--tui] [--store PATH] \
   [--verbose] [--format text|json]
 ```
@@ -23,6 +24,12 @@ Non-interactive execution requires `--yes`:
 ```console
 kazeflow run daily.py --yes
 ```
+
+For a partitioned closure, choose exactly one explicit selection form. `run` prints
+the normalized preflight selection kind, domain, and safe counts before confirmation;
+keys themselves remain out of portable presentation. Definition validation, including
+strict date validation and reversed-range rejection, completes before any asset body
+runs.
 
 ## Result modes
 

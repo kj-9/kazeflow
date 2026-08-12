@@ -23,3 +23,7 @@
 ## `DatePartitionDef`
 
 ::: kazeflow.DatePartitionDef
+
+## `PartitionDef`
+
+::: kazeflow.PartitionDef

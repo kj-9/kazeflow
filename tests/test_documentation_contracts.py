@@ -12,6 +12,7 @@ import pytest
 from kazeflow import AssetContext, DatePartitionDef, Flow, asset
 from kazeflow.assets import AssetRegistry, default_registry
 from kazeflow.cli import EXIT_SUCCESS, EXIT_USAGE, main
+from kazeflow.partition import PartitionDef
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +42,36 @@ def test_partition_selection_contract_matches_documentation(
     )
 
     assert main(["plan", str(entry)]) == EXIT_USAGE
-    assert "partition_keys are required" in capsys.readouterr().err
+    assert capsys.readouterr().err
+    assert not marker.exists()
+
+    invalid_date = "not-a-date"
+    assert (
+        main(
+            [
+                "plan",
+                str(entry),
+                "--partition-key",
+                invalid_date,
+            ]
+        )
+        == EXIT_USAGE
+    )
+    diagnostics = capsys.readouterr().err
+    assert invalid_date not in diagnostics
+    assert not marker.exists()
+
+    assert main(["partitions", str(entry), "--format", "json"]) == EXIT_SUCCESS
+    inspection = json.loads(capsys.readouterr().out)
+    assert inspection["partitions"] == [
+        {
+            "asset": "daily",
+            "definition_kind": "DatePartitionDef",
+            "domain": "date",
+            "key_format": "YYYY-MM-DD",
+            "supports_range": True,
+        }
+    ]
     assert not marker.exists()
 
     assert (
@@ -50,16 +80,59 @@ def test_partition_selection_contract_matches_documentation(
                 "plan",
                 str(entry),
                 "--partition-key",
-                "not-validated-as-a-date",
+                "2026-08-11",
                 "--format",
                 "json",
             ]
         )
         == EXIT_SUCCESS
     )
-    projection = json.loads(capsys.readouterr().out)
-    assert projection["config"]["partition_key_count"] == 1
-    assert projection["tasks"][0]["partition_key_count"] == 1
+    key_projection = json.loads(capsys.readouterr().out)
+    assert key_projection["config"]["partition_selection"] == {
+        "kind": "keys",
+        "domain": "date",
+        "count": 1,
+    }
+    assert key_projection["tasks"][0]["partition_selection"] == {
+        "kind": "keys",
+        "domain": "date",
+        "count": 1,
+    }
+    assert "2026-08-11" not in json.dumps(key_projection)
+    assert not marker.exists()
+
+    assert (
+        main(
+            [
+                "plan",
+                str(entry),
+                "--partition-range",
+                "2026-08-11",
+                "2026-08-13",
+                "--format",
+                "json",
+            ]
+        )
+        == EXIT_SUCCESS
+    )
+    range_projection = json.loads(capsys.readouterr().out)
+    assert range_projection["config"]["partition_selection"] == {
+        "kind": "range",
+        "domain": "date",
+        "count": 3,
+    }
+    assert not marker.exists()
+
+    assert (
+        main(["plan", str(entry), "--empty-partitions", "--format", "json"])
+        == EXIT_SUCCESS
+    )
+    empty_projection = json.loads(capsys.readouterr().out)
+    assert empty_projection["config"]["partition_selection"] == {
+        "kind": "empty",
+        "domain": "date",
+        "count": 0,
+    }
     assert not marker.exists()
 
     registry = AssetRegistry()
@@ -68,22 +141,32 @@ def test_partition_selection_contract_matches_documentation(
         raise AssertionError("planning must not execute assets")
 
     registry.register(daily, partition_def=DatePartitionDef())
-    plan = Flow(["daily"], registry=registry).plan(
-        {"partition_keys": ("not-validated-as-a-date",)}
-    )
-    assert plan.config.partition_keys == ("not-validated-as-a-date",)
+    plan = Flow(["daily"], registry=registry).plan({"partition_keys": ("2026-08-11",)})
+    assert plan.config.partition_keys == (date(2026, 8, 11),)
+    assert plan.config.selection_kind == "keys"
+    assert plan.config.partition_domain == "date"
 
-    keys = DatePartitionDef().range("2026-08-11", "2026-08-12")
+    date_partitions = DatePartitionDef()
+    keys = date_partitions.range("2026-08-11", "2026-08-12")
     assert keys == [date(2026, 8, 11), date(2026, 8, 12)]
     assert Flow(["daily"], registry=registry).plan(
-        {"partition_keys": keys}
-    ).config.partition_keys == (date(2026, 8, 11), date(2026, 8, 12))
+        {"partition_range": ("2026-08-11", "2026-08-12")}
+    ).config.partition_keys == tuple(keys)
+
+    with pytest.raises(ValueError):
+        Flow(["daily"], registry=registry).plan(
+            {"partition_range": ("2026-08-12", "2026-08-11")}
+        )
 
 
 def test_portable_failure_can_repeat_an_omitted_partition_key() -> None:
     secret_key = "tenant-secret-east"
 
-    @asset(partition_def=DatePartitionDef())
+    class TenantPartitionDef(PartitionDef):
+        def range(self, start, end):
+            return (start, end)
+
+    @asset(partition_def=TenantPartitionDef())
     def fails(context: AssetContext) -> None:
         raise RuntimeError(f"failed for {context.partition_key}")
 

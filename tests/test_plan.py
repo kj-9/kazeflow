@@ -1,11 +1,35 @@
 from dataclasses import FrozenInstanceError
+from datetime import date
 from typing import cast
 
 import pytest
 
 from kazeflow.assets import AssetRegistry
 from kazeflow.plan import FlowPlan, PlanConfig, TaskPlan, build_flow_plan
-from kazeflow.partition import DatePartitionDef
+from kazeflow.partition import DatePartitionDef, PartitionDef
+
+
+class IdentityPartitionDef(PartitionDef):
+    def range(self, start, end):
+        raise AssertionError("identity partitions do not support ranges")
+
+
+class AlternateDateDefinition(PartitionDef):
+    @property
+    def domain(self) -> str:
+        return "date"
+
+    def normalize_key(self, key: object) -> str:
+        return str(key).lower()
+
+    def range(self, start, end):
+        raise AssertionError("alternate definitions do not support ranges")
+
+
+class TenantPartitionDef(IdentityPartitionDef):
+    @property
+    def domain(self) -> str:
+        return "tenant"
 
 
 @pytest.fixture
@@ -13,7 +37,14 @@ def registry() -> AssetRegistry:
     return AssetRegistry()
 
 
-def register(registry: AssetRegistry, name: str, *, deps=(), partitioned=False):
+def register(
+    registry: AssetRegistry,
+    name: str,
+    *,
+    deps=(),
+    partitioned=False,
+    partition_def: PartitionDef | None = None,
+):
     def asset_function():
         raise AssertionError("planning must not invoke asset functions")
 
@@ -21,7 +52,13 @@ def register(registry: AssetRegistry, name: str, *, deps=(), partitioned=False):
     registry.register(
         asset_function,
         deps=list(deps),
-        partition_def=DatePartitionDef() if partitioned else None,
+        partition_def=(
+            partition_def
+            if partition_def is not None
+            else DatePartitionDef()
+            if partitioned
+            else None
+        ),
     )
 
 
@@ -57,6 +94,108 @@ def test_explicit_empty_partition_selection_is_not_unpartitioned(
 
     assert plan.config.partition_keys == ()
     assert plan.tasks[0].partition_keys == ()
+    assert plan.config.selection_kind == "empty"
+    assert plan.config.partition_domain == "date"
+    assert plan.tasks[0].partition_domain == "date"
+
+
+def test_date_selection_is_normalized_and_range_is_inclusive(
+    registry: AssetRegistry,
+):
+    register(registry, "daily", partitioned=True)
+
+    keyed_plan = build_flow_plan(
+        ["daily"],
+        config=PlanConfig(partition_keys=["2026-08-11"]),
+        registry=registry,
+    )
+    ranged_plan = build_flow_plan(
+        ["daily"],
+        config=PlanConfig(partition_range=["2026-08-11", "2026-08-13"]),
+        registry=registry,
+    )
+
+    assert keyed_plan.config.selection_kind == "keys"
+    assert keyed_plan.config.partition_keys == (date(2026, 8, 11),)
+    assert ranged_plan.config.selection_kind == "range"
+    assert ranged_plan.config.partition_range == (
+        date(2026, 8, 11),
+        date(2026, 8, 13),
+    )
+    assert ranged_plan.config.partition_keys == (
+        date(2026, 8, 11),
+        date(2026, 8, 12),
+        date(2026, 8, 13),
+    )
+
+    single_day_plan = build_flow_plan(
+        ["daily"],
+        config=PlanConfig(partition_range=["2026-08-11", "2026-08-11"]),
+        registry=registry,
+    )
+    assert single_day_plan.config.partition_range == (
+        date(2026, 8, 11),
+        date(2026, 8, 11),
+    )
+    assert single_day_plan.config.partition_keys == (date(2026, 8, 11),)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        PlanConfig(partition_keys=["bad-date"]),
+        PlanConfig(partition_range=["2026-08-13", "2026-08-11"]),
+        PlanConfig(
+            partition_keys=["2026-08-11"], partition_range=["2026-08-11", "2026-08-11"]
+        ),
+    ],
+)
+def test_invalid_date_selection_fails_before_planning_work(
+    registry: AssetRegistry, config: PlanConfig
+):
+    register(registry, "daily", partitioned=True)
+
+    with pytest.raises(ValueError) as error:
+        build_flow_plan(["daily"], config=config, registry=registry)
+
+    assert "bad-date" not in str(error.value)
+
+
+def test_partition_selection_is_rejected_for_unpartitioned_closure(
+    registry: AssetRegistry,
+):
+    register(registry, "plain")
+
+    with pytest.raises(ValueError, match="requires a partitioned task"):
+        build_flow_plan(
+            ["plain"], config=PlanConfig(partition_keys=[]), registry=registry
+        )
+
+
+def test_incompatible_domains_and_normalization_are_rejected(
+    registry: AssetRegistry,
+):
+    register(registry, "date_asset", partitioned=True)
+    register(registry, "tenant_asset", partition_def=TenantPartitionDef())
+
+    with pytest.raises(
+        ValueError, match=r"date_asset \(date\).+tenant_asset \(tenant\)"
+    ):
+        build_flow_plan(
+            ["date_asset", "tenant_asset"],
+            config=PlanConfig(partition_keys=["2026-08-11"]),
+            registry=registry,
+        )
+
+    registry.clear()
+    register(registry, "canonical", partitioned=True)
+    register(registry, "different", partition_def=AlternateDateDefinition())
+    with pytest.raises(ValueError, match="normalize to different keys"):
+        build_flow_plan(
+            ["canonical", "different"],
+            config=PlanConfig(partition_keys=["2026-08-11"]),
+            registry=registry,
+        )
 
 
 def test_planning_does_not_execute_assets_or_create_side_effects(
@@ -200,7 +339,11 @@ def test_invalid_partition_keys_are_rejected(registry: AssetRegistry, partition_
 
 @pytest.mark.parametrize("partition_key", [0, False, ""])
 def test_falsey_partition_keys_are_preserved(registry: AssetRegistry, partition_key):
-    register(registry, "partitioned", partitioned=True)
+    register(
+        registry,
+        "partitioned",
+        partition_def=IdentityPartitionDef(),
+    )
 
     plan = build_flow_plan(
         ["partitioned"],

@@ -79,7 +79,10 @@ flow = Flow(['publish'])
     plan = json.loads(stdout)
     assert plan["schema_version"] == 1
     assert plan["targets"] == ["publish"]
-    assert plan["config"] == {"max_concurrency": 2, "partition_key_count": None}
+    assert plan["config"] == {
+        "max_concurrency": 2,
+        "partition_selection": {"kind": "omitted", "domain": None, "count": None},
+    }
     assert [task["name"] for task in plan["tasks"]] == ["source", "publish"]
     assert "unrelated" not in [task["name"] for task in plan["tasks"]]
 
@@ -213,9 +216,9 @@ flow = Flow(['publish'])
             "plan",
             str(entry),
             "--partition-key",
-            "secret-east",
+            "2026-08-11",
             "--partition-key",
-            "secret-west",
+            "2026-08-12",
             "--format",
             "json",
         ],
@@ -224,12 +227,24 @@ flow = Flow(['publish'])
     assert status == 0
     assert stderr == ""
     plan = json.loads(stdout)
-    assert plan["config"]["partition_key_count"] == 2
+    assert plan["config"]["partition_selection"] == {
+        "kind": "keys",
+        "domain": "date",
+        "count": 2,
+    }
     assert plan["tasks"] == [
-        {"name": "publish", "dependencies": [], "partition_key_count": 2}
+        {
+            "name": "publish",
+            "dependencies": [],
+            "partition_selection": {
+                "kind": "keys",
+                "domain": "date",
+                "count": 2,
+            },
+        }
     ]
-    assert "secret-east" not in stdout
-    assert "secret-west" not in stdout
+    assert "2026-08-11" not in stdout
+    assert "2026-08-12" not in stdout
 
 
 def test_plan_renders_deterministic_text_mermaid_and_dot_graphs(
@@ -321,7 +336,7 @@ def publish():
             "plan",
             str(entry),
             "--partition-key",
-            "private-key",
+            "2026-08-11",
             "--verbose",
         ],
     )
@@ -329,7 +344,7 @@ def publish():
     assert status == 0
     assert stderr == ""
     assert "Details:" in stdout
-    assert "private-key" not in stdout
+    assert "2026-08-11" not in stdout
 
     status, stdout, stderr = _run(
         capsys,
@@ -588,9 +603,9 @@ flow = Flow(["publish"])
             str(entry),
             "--yes",
             "--partition-key",
-            "private-east",
+            "2026-08-11",
             "--partition-key",
-            "private-west",
+            "2026-08-12",
             "--store",
             str(store),
             "--verbose",
@@ -609,8 +624,8 @@ flow = Flow(["publish"])
     assert "attempt 1/2 (partitioned; failed;" in stdout
     assert "kazeflow runs show " in stdout
     assert f"--store {store}" in stdout
-    assert "private-east" not in stdout
-    assert "private-west" not in stdout
+    assert "2026-08-11" not in stdout
+    assert "2026-08-12" not in stdout
     assert "raw output must stay private" not in stdout
 
 
@@ -974,3 +989,259 @@ def test_runs_history_errors_do_not_create_a_store_or_emit_success_output(
     assert status == 2
     assert stdout == ""
     assert "--limit" in stderr
+
+
+def test_partitions_inspects_selected_definitions_without_asset_invocation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "ran.txt"
+    entry = _script(
+        tmp_path,
+        "inspect_partitions.py",
+        f"""
+from pathlib import Path
+from kazeflow import DatePartitionDef, Flow, asset
+
+marker = Path({str(marker)!r})
+
+@asset(partition_def=DatePartitionDef())
+def source():
+    marker.write_text("asset body", encoding="utf-8")
+
+@asset
+def summary(source):
+    marker.write_text("summary body", encoding="utf-8")
+
+flow = Flow(["summary"])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["partitions", str(entry), "--format", "json"]
+    )
+
+    assert status == 0
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "schema_version": 1,
+        "targets": ["summary"],
+        "partitions": [
+            {
+                "asset": "source",
+                "definition_kind": "DatePartitionDef",
+                "domain": "date",
+                "key_format": "YYYY-MM-DD",
+                "supports_range": True,
+            }
+        ],
+    }
+    assert not marker.exists()
+
+
+def test_partitions_reports_an_explicit_empty_result_for_unpartitioned_closure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "no_partitions.py",
+        """
+from kazeflow import asset
+
+@asset
+def publish():
+    return None
+""",
+    )
+
+    status, stdout, stderr = _run(capsys, ["partitions", str(entry)])
+
+    assert status == 0
+    assert stderr == ""
+    assert stdout == "No partition definitions in selected flow.\n"
+
+
+def test_plan_projects_range_empty_and_safe_partition_metadata(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "selection_forms.py",
+        """
+from kazeflow import DatePartitionDef, Flow, asset
+
+@asset(partition_def=DatePartitionDef())
+def publish():
+    raise AssertionError("asset body must not run")
+
+flow = Flow(["publish"])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "plan",
+            str(entry),
+            "--partition-range",
+            "2026-08-11",
+            "2026-08-13",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert status == 0
+    assert stderr == ""
+    plan = json.loads(stdout)
+    assert plan["config"]["partition_selection"] == {
+        "kind": "range",
+        "domain": "date",
+        "count": 3,
+    }
+    assert plan["tasks"][0]["partition_selection"] == {
+        "kind": "range",
+        "domain": "date",
+        "count": 3,
+    }
+    assert "2026-08-11" not in stdout
+    assert "2026-08-13" not in stdout
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "plan",
+            str(entry),
+            "--partition-range",
+            "2026-08-11",
+            "2026-08-13",
+            "--format",
+            "mermaid",
+        ],
+    )
+
+    assert status == 0
+    assert stderr == ""
+    assert "selection: range; domain: date" in stdout
+    assert "2026-08-11" not in stdout
+    assert "2026-08-13" not in stdout
+
+    status, stdout, stderr = _run(
+        capsys, ["plan", str(entry), "--empty-partitions", "--format", "json"]
+    )
+
+    assert status == 0
+    assert stderr == ""
+    assert json.loads(stdout)["config"]["partition_selection"] == {
+        "kind": "empty",
+        "domain": "date",
+        "count": 0,
+    }
+
+
+def test_plan_rejects_conflicting_or_irrelevant_partition_selectors_before_work(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "ran.txt"
+    partitioned = _script(
+        tmp_path,
+        "partitioned_validation.py",
+        f"""
+from pathlib import Path
+from kazeflow import DatePartitionDef, asset
+
+marker = Path({str(marker)!r})
+
+@asset(partition_def=DatePartitionDef())
+def publish():
+    marker.write_text("asset body", encoding="utf-8")
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "plan",
+            str(partitioned),
+            "--partition-key",
+            "2026-08-11",
+            "--empty-partitions",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert status == 2
+    assert stdout == ""
+    assert "not allowed with argument" in stderr
+    assert not marker.exists()
+
+    unpartitioned = _script(
+        tmp_path,
+        "unpartitioned_validation.py",
+        f"""
+from pathlib import Path
+from kazeflow import asset
+
+marker = Path({str(marker)!r})
+
+@asset
+def publish():
+    marker.write_text("asset body", encoding="utf-8")
+""",
+    )
+    status, stdout, stderr = _run(
+        capsys,
+        [
+            "plan",
+            str(unpartitioned),
+            "--partition-key",
+            "ignored",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert status == 2
+    assert stdout == ""
+    assert stderr.startswith("kazeflow:")
+    assert not marker.exists()
+
+
+def test_run_executes_the_exact_preflight_partition_plan(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "executed-key.txt"
+    entry = _script(
+        tmp_path,
+        "stateful_partition.py",
+        f"""
+from pathlib import Path
+from kazeflow import AssetContext, Flow, PartitionDef, asset
+
+class StatefulPartitionDef(PartitionDef):
+    calls = 0
+
+    def normalize_key(self, key):
+        type(self).calls += 1
+        return f"normalized-{{type(self).calls}}"
+
+    def range(self, start, end):
+        raise AssertionError("range is not supported")
+
+@asset(partition_def=StatefulPartitionDef())
+def publish(context: AssetContext):
+    Path({str(marker)!r}).write_text(str(context.partition_key), encoding="utf-8")
+
+flow = Flow(["publish"])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys,
+        ["run", str(entry), "--partition-key", "raw", "--yes"],
+    )
+
+    assert status == 0
+    assert "Run result:" in stdout
+    assert "Planned run:" in stderr
+    assert marker.read_text(encoding="utf-8") == "normalized-1"

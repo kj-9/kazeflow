@@ -6,6 +6,7 @@ flow scripts. Use task pages for the exact command you need.
 | Command | Purpose |
 | --- | --- |
 | [`assets`](cli/assets.md) | List assets discovered while loading an entry. |
+| [`partitions`](cli/partitions.md) | Inspect partition definitions and supported selection forms without asset execution. |
 | [`plan`](cli/plan.md) | Review targets, order, partitions, configuration, and graph. |
 | [`run`](cli/run.md) | Review a preflight, approve, execute, and print a result. |
 | [`runs`](cli/history.md) | List, show, or compare explicitly stored records. |

@@ -1,7 +1,7 @@
 # Rerun selected dates
 
-Declare a date-partitioned asset, then use one identical selection for review and
-execution.
+Declare a date-partitioned asset, inspect its selection contract, then plan and run
+only the reviewed slice.
 
 ```python title="daily.py"
 from kazeflow import DatePartitionDef, Flow, asset
@@ -16,22 +16,36 @@ flow = Flow(["publish_daily"])
 ```
 
 ```console
+kazeflow partitions daily.py
 kazeflow plan daily.py --partition-key 2026-08-11
 kazeflow run daily.py --partition-key 2026-08-11 --yes
 ```
 
-For several slices, repeat the option. The current CLI accepts each value as an
-explicit string; `DatePartitionDef` does not validate or coerce it. Omitting every
-key is a configuration error before an asset body runs.
+`DatePartitionDef` strictly validates canonical `YYYY-MM-DD` input and normalizes it
+to a Python `date` before execution. An invalid date, a non-canonical date string,
+or omitted selection is rejected during preflight; `publish_daily` does not run.
 
-Generate `date` objects through the Python API only when that is the key type your
-asset expects:
+For consecutive dates, use one explicit inclusive range rather than relying on an
+implicit current day or catalog:
+
+```console
+kazeflow plan daily.py --partition-range 2026-08-11 2026-08-12
+kazeflow run daily.py --partition-range 2026-08-11 2026-08-12 --yes
+```
+
+The equivalent Python selection remains bounded and explicit:
 
 ```python
 keys = DatePartitionDef().range("2026-08-11", "2026-08-12")
-config = {"partition_keys": keys}
-plan = flow.plan(config)
+plan = flow.plan({"partition_keys": keys})
 ```
 
-See [Select partitions deliberately](../partitions.md) for empty selections,
-portable-record sensitivity, and the current validation boundary.
+To plan no partition work on purpose, use `--empty-partitions`. This is distinct
+from omitting every selector, which is an error for a partitioned flow:
+
+```console
+kazeflow plan daily.py --empty-partitions
+```
+
+See [Select partitions deliberately](../partitions.md) for repeatable keys, custom
+falsey keys, domain compatibility, and portable-record sensitivity.

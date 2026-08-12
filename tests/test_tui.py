@@ -6,7 +6,7 @@ from rich.console import Console
 
 from kazeflow.assets import AssetContext, asset, default_registry
 from kazeflow.flow import Flow
-from kazeflow.partition import DatePartitionDef
+from kazeflow.partition import PartitionDef
 from kazeflow.results import FlowStatus
 from kazeflow.tui import FlowTUIRenderer, show_flow_tree, show_plan_tree
 
@@ -40,7 +40,11 @@ def test_tree_renderers_accept_legacy_graph_and_flow_plan(
 
 @pytest.mark.asyncio
 async def test_renderer_consumes_events_and_preserves_result_semantics() -> None:
-    partitions = DatePartitionDef()
+    class IdentityPartitionDef(PartitionDef):
+        def range(self, start, end):
+            raise AssertionError("identity partitions do not support ranges")
+
+    partitions = IdentityPartitionDef()
 
     @asset(partition_def=partitions)
     async def work(context: AssetContext) -> object:

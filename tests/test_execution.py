@@ -1,12 +1,18 @@
 import asyncio
+from datetime import date
 
 import pytest
 
 from kazeflow.assets import AssetContext, AssetRegistry, asset, default_registry
 from kazeflow.events import validate_event_sequence
 from kazeflow.flow import Flow, run
-from kazeflow.partition import DatePartitionDef
+from kazeflow.partition import DatePartitionDef, PartitionDef
 from kazeflow.results import AttemptStatus, FlowStatus, SkipReason
+
+
+class IdentityPartitionDef(PartitionDef):
+    def range(self, start, end):
+        raise AssertionError("identity partitions do not support ranges")
 
 
 @pytest.fixture(autouse=True)
@@ -161,19 +167,62 @@ async def test_ready_work_and_partitions_drain_exactly_once_under_bound() -> Non
 
 
 @pytest.mark.asyncio
+async def test_date_range_normalizes_before_asset_execution() -> None:
+    calls: list[date] = []
+
+    @asset(partition_def=DatePartitionDef())
+    async def daily(context: AssetContext) -> date:
+        assert isinstance(context.partition_key, date)
+        calls.append(context.partition_key)
+        return context.partition_key
+
+    result = await Flow(["daily"]).run_async(
+        {"partition_range": ("2026-08-11", "2026-08-12")}
+    )
+
+    assert calls == [date(2026, 8, 11), date(2026, 8, 12)]
+    assert [
+        attempt.attempt.partition_key for attempt in result.tasks[0].attempts
+    ] == calls
+
+
+@pytest.mark.asyncio
+async def test_invalid_date_selection_runs_no_assets_or_events() -> None:
+    called = False
+    events: list[object] = []
+
+    @asset(partition_def=DatePartitionDef())
+    async def daily() -> None:
+        nonlocal called
+        called = True
+
+    class Consumer:
+        def on_event(self, event: object) -> None:
+            events.append(event)
+
+    with pytest.raises(ValueError):
+        await Flow(["daily"]).run_async(
+            {"partition_keys": ("not-a-date",)}, event_consumer=Consumer()
+        )
+
+    assert called is False
+    assert events == []
+
+
+@pytest.mark.asyncio
 async def test_partition_shapes_falsey_keys_empty_reducer_and_fresh_rerun() -> None:
-    date_def = DatePartitionDef()
+    partition_def = IdentityPartitionDef()
     received: list[tuple[object, dict[object, object], dict[object, object]]] = []
 
-    @asset(partition_def=date_def)
+    @asset(partition_def=partition_def)
     async def left(context: AssetContext) -> str:
         return f"left-{context.partition_key}"
 
-    @asset(partition_def=date_def)
+    @asset(partition_def=partition_def)
     async def right(context: AssetContext) -> str:
         return f"right-{context.partition_key}"
 
-    @asset(partition_def=date_def)
+    @asset(partition_def=partition_def)
     async def joined(
         left: dict[object, object], right: dict[object, object], context: AssetContext
     ) -> object:
@@ -202,16 +251,16 @@ async def test_partition_shapes_falsey_keys_empty_reducer_and_fresh_rerun() -> N
 
 @pytest.mark.asyncio
 async def test_matching_partition_failure_blocks_only_matching_key() -> None:
-    date_def = DatePartitionDef()
+    partition_def = IdentityPartitionDef()
     seen: list[object] = []
 
-    @asset(partition_def=date_def)
+    @asset(partition_def=partition_def)
     async def upstream(context: AssetContext) -> object:
         if context.partition_key == 0:
             raise ValueError("zero")
         return context.partition_key
 
-    @asset(partition_def=date_def)
+    @asset(partition_def=partition_def)
     async def downstream(
         upstream: dict[object, object], context: AssetContext
     ) -> object:

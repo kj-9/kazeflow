@@ -25,7 +25,10 @@ def test_public_review_workflow_inspects_plan_before_running_selected_targets() 
         invoked.append(f"publish:{context.partition_key}")
         return f"{source}:{context.partition_key}"
 
-    run_config = {"max_concurrency": 2, "partition_keys": ["east", "west"]}
+    run_config = {
+        "max_concurrency": 2,
+        "partition_keys": ["2026-08-11", "2026-08-12"],
+    }
     flow = kazeflow.Flow(["publish"])
 
     plan = flow.plan(run_config)
@@ -37,9 +40,15 @@ def test_public_review_workflow_inspects_plan_before_running_selected_targets() 
         ("publish", ("source",)),
     ]
     assert plan.config.max_concurrency == 2
-    assert plan.config.partition_keys == ("east", "west")
+    assert tuple(map(str, plan.config.partition_keys or ())) == (
+        "2026-08-11",
+        "2026-08-12",
+    )
     assert plan.tasks[0].partition_keys is None
-    assert plan.tasks[1].partition_keys == ("east", "west")
+    assert tuple(map(str, plan.tasks[1].partition_keys or ())) == (
+        "2026-08-11",
+        "2026-08-12",
+    )
     assert invoked == []
 
     result = kazeflow.run(["publish"], run_config)
@@ -51,11 +60,14 @@ def test_public_review_workflow_inspects_plan_before_running_selected_targets() 
         AttemptStatus.SUCCESS,
     ]
     assert [attempt.output for attempt in result.tasks[1].attempts] == [
-        "raw:east",
-        "raw:west",
+        "raw:2026-08-11",
+        "raw:2026-08-12",
     ]
     assert invoked[0] == "source"
-    assert sorted(invoked[1:]) == ["publish:east", "publish:west"]
+    assert sorted(invoked[1:]) == [
+        "publish:2026-08-11",
+        "publish:2026-08-12",
+    ]
 
 
 def test_public_result_exposes_failed_and_dependency_blocked_attempts() -> None:

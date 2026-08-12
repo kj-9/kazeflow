@@ -57,7 +57,6 @@ class _LoadedEntry:
 @dataclass(frozen=True)
 class _SelectedRun:
     flow: Flow
-    config: dict[str, Any] | None
     plan: FlowPlan
 
 
@@ -75,12 +74,22 @@ def _parser() -> argparse.ArgumentParser:
     assets.add_argument("entry", help="a Python file or module:attribute entry")
     assets.add_argument("--format", choices=("text", "json"), default="text")
 
+    partitions = commands.add_parser(
+        "partitions", help="inspect partition definitions without executing assets"
+    )
+    partitions.add_argument("entry", help="a Python file or module:attribute entry")
+    partitions.add_argument("--target", dest="targets", action="append", default=[])
+    partitions.add_argument("--format", choices=("text", "json"), default="text")
+
     plan = commands.add_parser("plan", help="build a plan without executing assets")
     plan.add_argument("entry", help="a Python file or module:attribute entry")
     plan.add_argument("--target", dest="targets", action="append", default=[])
-    plan.add_argument(
+    plan_selection = plan.add_mutually_exclusive_group()
+    plan_selection.add_argument(
         "--partition-key", "--partition", dest="partition_keys", action="append"
     )
+    plan_selection.add_argument("--partition-range", nargs=2, metavar=("START", "END"))
+    plan_selection.add_argument("--empty-partitions", action="store_true")
     plan.add_argument("--max-concurrency", type=int)
     plan.add_argument(
         "--format", choices=("text", "json", "mermaid", "dot"), default="text"
@@ -94,9 +103,12 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="review and deliberately execute a flow")
     run.add_argument("entry", help="a Python file or module:attribute entry")
     run.add_argument("--target", dest="targets", action="append", default=[])
-    run.add_argument(
+    run_selection = run.add_mutually_exclusive_group()
+    run_selection.add_argument(
         "--partition-key", "--partition", dest="partition_keys", action="append"
     )
+    run_selection.add_argument("--partition-range", nargs=2, metavar=("START", "END"))
+    run_selection.add_argument("--empty-partitions", action="store_true")
     run.add_argument("--max-concurrency", type=int)
     run.add_argument("--format", choices=("text", "json"), default="text")
     run.add_argument(
@@ -140,6 +152,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "assets":
             loaded = _load_entry(args.entry)
             _emit_assets(loaded, args.format)
+        elif args.command == "partitions":
+            loaded = _load_entry(args.entry)
+            _emit_partitions(loaded, args)
         elif args.command == "plan":
             loaded = _load_entry(args.entry)
             _emit_plan(loaded, args)
@@ -332,10 +347,57 @@ def _emit_plan(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
     _text_plan(selected.plan, verbose=args.verbose)
 
 
+def _emit_partitions(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
+    """Describe selected partition definitions without planning executable work."""
+    flow = _resolve_flow(loaded, args)
+    records = _partition_definition_records(flow)
+    # Reuse planner validation for dependency metadata, cycles, legacy graphs, and
+    # the single-domain invariant. An empty selection performs no asset work.
+    flow.plan({"partition_keys": []} if records else None)
+    if args.format == "json":
+        _json_output(
+            {
+                "schema_version": 1,
+                "targets": list(flow.targets),
+                "partitions": records,
+            }
+        )
+        return
+    if not records:
+        print("No partition definitions in selected flow.")
+        return
+    print("Partitions:")
+    for definition in records:
+        range_support = "supported" if definition["supports_range"] else "not supported"
+        print(
+            f"- {definition['asset']} (definition: {definition['definition_kind']}; "
+            f"domain: {definition['domain']}; key format: {definition['key_format']}; "
+            f"bounded range: {range_support})"
+        )
+
+
 def _select_run(
     loaded: _LoadedEntry, args: argparse.Namespace, *, require_one_target: bool = False
 ) -> _SelectedRun:
     """Resolve the flow, normalized options, and a side-effect-free preflight plan."""
+    flow = _resolve_flow(loaded, args, require_one_target=require_one_target)
+    config: dict[str, Any] = {}
+    if args.max_concurrency is not None:
+        config["max_concurrency"] = args.max_concurrency
+    if args.partition_keys is not None:
+        config["partition_keys"] = args.partition_keys
+    elif args.partition_range is not None:
+        config["partition_range"] = tuple(args.partition_range)
+    elif args.empty_partitions:
+        config["partition_keys"] = []
+    plan = flow.plan(config or None)
+    return _SelectedRun(flow, plan)
+
+
+def _resolve_flow(
+    loaded: _LoadedEntry, args: argparse.Namespace, *, require_one_target: bool = False
+) -> Flow:
+    """Resolve targets exactly as plan/run/partitions share their entry contract."""
     targets = list(args.targets)
     if loaded.flow is None:
         if not targets:
@@ -344,18 +406,8 @@ def _select_run(
                 raise _UsageError(
                     "run requires --target when discovered terminal targets are ambiguous"
                 )
-        flow = Flow(targets, registry=_registry_for(loaded.assets))
-    else:
-        flow = (
-            loaded.flow if not targets else Flow(targets, registry=loaded.flow.registry)
-        )
-    config: dict[str, Any] = {}
-    if args.max_concurrency is not None:
-        config["max_concurrency"] = args.max_concurrency
-    if args.partition_keys is not None:
-        config["partition_keys"] = args.partition_keys
-    plan = flow.plan(config or None)
-    return _SelectedRun(flow, config or None, plan)
+        return Flow(targets, registry=_registry_for(loaded.assets))
+    return loaded.flow if not targets else Flow(targets, registry=loaded.flow.registry)
 
 
 def _run_selected(loaded: _LoadedEntry, args: argparse.Namespace) -> int:
@@ -388,7 +440,7 @@ def _execute(selected: _SelectedRun, *, use_tui: bool) -> Any:
     """Run only after approval, keeping the optional presenter fully lazy."""
     if not use_tui:
         try:
-            return asyncio.run(selected.flow.run_async(selected.config))
+            return asyncio.run(selected.flow._run_plan_async(selected.plan))
         except Exception as error:
             raise _InfrastructureError(f"execution failed: {error}") from error
 
@@ -400,7 +452,7 @@ def _execute(selected: _SelectedRun, *, use_tui: bool) -> Any:
         renderer = FlowTUIRenderer(plan=selected.plan, console=Console(stderr=True))
         with renderer:
             return asyncio.run(
-                selected.flow.run_async(selected.config, event_consumer=renderer)
+                selected.flow._run_plan_async(selected.plan, event_consumer=renderer)
             )
     except Exception as error:
         raise _InfrastructureError(f"TUI adapter failed: {error}") from error
@@ -717,24 +769,90 @@ def _asset_record(asset: Asset) -> dict[str, Any]:
     }
 
 
+def _partition_definition_record(asset: Asset) -> dict[str, Any]:
+    """Project author-owned definition metadata without exposing selected keys."""
+    definition = asset.partition_def
+    assert definition is not None
+    return {
+        "asset": asset.name,
+        "definition_kind": definition.kind,
+        "domain": definition.domain,
+        "key_format": definition.key_format,
+        "supports_range": definition.supports_range,
+    }
+
+
+def _partition_definition_records(flow: Flow) -> list[dict[str, Any]]:
+    """Read partition metadata from the selected dependency closure only.
+
+    This deliberately mirrors the planner's graph walk without constructing a plan:
+    a partitioned flow cannot build its executable plan until a selection is supplied.
+    """
+    pending = list(flow.targets)
+    visited: set[str] = set()
+    records: list[dict[str, Any]] = []
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        try:
+            asset = flow.registry.get(name)
+        except (KeyError, ValueError) as error:
+            raise _UsageError(f"Asset '{name}' not found") from error
+        pending.extend(asset.deps)
+        definition = asset.partition_def
+        if definition is None:
+            continue
+        records.append(_partition_definition_record(asset))
+    return sorted(records, key=lambda record: record["asset"])
+
+
+def _selection_record(
+    *,
+    kind: str,
+    domain: str | None,
+    count: int | None,
+) -> dict[str, Any]:
+    return {"kind": kind, "domain": domain, "count": count}
+
+
+def _plan_selection_record(plan: FlowPlan) -> dict[str, Any]:
+    return _selection_record(
+        kind=plan.config.selection_kind,
+        domain=plan.config.partition_domain,
+        count=(
+            None
+            if plan.config.partition_keys is None
+            else len(plan.config.partition_keys)
+        ),
+    )
+
+
+def _task_selection_record(task: Any, *, selection_kind: str) -> dict[str, Any]:
+    if task.partition_keys is None:
+        return _selection_record(kind="unpartitioned", domain=None, count=None)
+    return _selection_record(
+        kind=selection_kind,
+        domain=task.partition_domain,
+        count=len(task.partition_keys),
+    )
+
+
 def _plan_record(plan: FlowPlan) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "targets": list(plan.targets),
         "config": {
             "max_concurrency": plan.config.max_concurrency,
-            "partition_key_count": (
-                None
-                if plan.config.partition_keys is None
-                else len(plan.config.partition_keys)
-            ),
+            "partition_selection": _plan_selection_record(plan),
         },
         "tasks": [
             {
                 "name": task.name,
                 "dependencies": list(task.dependencies),
-                "partition_key_count": (
-                    None if task.partition_keys is None else len(task.partition_keys)
+                "partition_selection": _task_selection_record(
+                    task, selection_kind=plan.config.selection_kind
                 ),
             }
             for task in plan.tasks
@@ -761,7 +879,9 @@ def _text_plan(
     )
     print("Graph:", file=stream)
     for task in plan.tasks:
-        label = _text_task_label(task.name, task.partition_keys, plan.targets)
+        label = _text_task_label(
+            task, plan.targets, selection_kind=plan.config.selection_kind
+        )
         if task.dependencies:
             for dependency in task.dependencies:
                 print(f"  {dependency} --> {label}", file=stream)
@@ -775,10 +895,8 @@ def _text_plan(
     print(f"- partition_keys: {_partition_summary(plan)}", file=stream)
     for task in plan.tasks:
         dependencies = ", ".join(task.dependencies) or "none"
-        partition_detail = (
-            "unpartitioned"
-            if task.partition_keys is None
-            else f"{len(task.partition_keys)} selected"
+        partition_detail = _task_partition_summary(
+            task, selection_kind=plan.config.selection_kind
         )
         print(
             f"- {task.name} (dependencies: {dependencies}; partitions: {partition_detail})",
@@ -793,29 +911,52 @@ def _concurrency_summary(plan: FlowPlan) -> str:
 
 
 def _partition_summary(plan: FlowPlan) -> str:
-    if plan.config.partition_keys is None:
+    selection = _plan_selection_record(plan)
+    if selection["kind"] == "omitted":
         return "no partition selection"
-    return f"{len(plan.config.partition_keys)} partitions selected"
-
-
-def _text_task_label(
-    name: str, partition_keys: Sequence[Any] | None, targets: Sequence[str]
-) -> str:
-    suffix = " *" if name in targets else ""
-    partition = (
-        "" if partition_keys is None else f" [partitions: {len(partition_keys)}]"
+    if selection["kind"] == "empty":
+        return f"explicit empty partition selection (domain: {selection['domain']})"
+    source = " from bounded range" if selection["kind"] == "range" else ""
+    return (
+        f"{selection['count']} partitions selected{source} "
+        f"(domain: {selection['domain']})"
     )
-    return f"{name}{partition}{suffix}"
+
+
+def _task_partition_summary(task: Any, *, selection_kind: str) -> str:
+    selection = _task_selection_record(task, selection_kind=selection_kind)
+    if selection["kind"] == "unpartitioned":
+        return "unpartitioned"
+    return (
+        f"{selection['count']} selected; kind: {selection['kind']}; "
+        f"domain: {selection['domain']}"
+    )
+
+
+def _text_task_label(task: Any, targets: Sequence[str], *, selection_kind: str) -> str:
+    suffix = " *" if task.name in targets else ""
+    selection = _task_selection_record(task, selection_kind=selection_kind)
+    partition = ""
+    if selection["kind"] != "unpartitioned":
+        partition = (
+            f" [partitions: {selection['count']}; selection: {selection['kind']}; "
+            f"domain: {selection['domain']}]"
+        )
+    return f"{task.name}{partition}{suffix}"
 
 
 def _graph_node_ids(plan: FlowPlan) -> dict[str, str]:
     return {task.name: f"task_{index}" for index, task in enumerate(plan.tasks)}
 
 
-def _graph_label(task: Any, targets: Sequence[str]) -> str:
+def _graph_label(task: Any, targets: Sequence[str], *, selection_kind: str) -> str:
     label = task.name
-    if task.partition_keys is not None:
-        label += f" [partitions: {len(task.partition_keys)}]"
+    selection = _task_selection_record(task, selection_kind=selection_kind)
+    if selection["kind"] != "unpartitioned":
+        label += (
+            f" [partitions: {selection['count']}; selection: {selection['kind']}; "
+            f"domain: {selection['domain']}]"
+        )
     if task.name in targets:
         label += " (target)"
     return label
@@ -826,7 +967,8 @@ def _mermaid_plan(plan: FlowPlan) -> None:
     print("flowchart LR")
     for task in plan.tasks:
         print(
-            f"    {node_ids[task.name]}[{json.dumps(_graph_label(task, plan.targets))}]"
+            f"    {node_ids[task.name]}["
+            f"{json.dumps(_graph_label(task, plan.targets, selection_kind=plan.config.selection_kind))}]"
         )
     for task in plan.tasks:
         for dependency in task.dependencies:
@@ -839,7 +981,7 @@ def _dot_plan(plan: FlowPlan) -> None:
     print("  rankdir=LR;")
     for task in plan.tasks:
         print(
-            f"  {node_ids[task.name]} [label={json.dumps(_graph_label(task, plan.targets))}];"
+            f"  {node_ids[task.name]} [label={json.dumps(_graph_label(task, plan.targets, selection_kind=plan.config.selection_kind))}];"
         )
     for task in plan.tasks:
         for dependency in task.dependencies:

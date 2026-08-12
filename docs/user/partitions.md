@@ -1,11 +1,15 @@
 # Select partitions deliberately
 
 A partitioned asset represents independent slices of one task—often dates, regions,
-files, or tenants. In the current release, the CLI selects keys explicitly and
-passes each value through as a string. A Partition definition marks the asset as
-partitioned; it does not parse or validate CLI values.
+files, or tenants. An unpartitioned asset runs once. A partitioned asset creates one
+attempt for each explicitly selected, normalized key.
 
-## Declare a partitioned asset
+The selected dependency closure has one partition domain. The definition on each
+partitioned asset owns how its input becomes a canonical key, or whether it is
+rejected. This makes a plan useful for review: invalid selection is diagnosed before
+an asset body or execution event starts.
+
+## Declare a date-partitioned asset
 
 ```python
 from kazeflow import DatePartitionDef, Flow, asset
@@ -19,17 +23,39 @@ def publish_daily() -> None:
 flow = Flow(["publish_daily"])
 ```
 
-An unpartitioned asset runs once. A partitioned asset creates one attempt per
-selected key.
+`DatePartitionDef` has the stable `date` domain. It accepts canonical ISO
+`YYYY-MM-DD` text from the CLI and normalizes it to an in-memory `datetime.date`
+before execution. Invalid dates, non-canonical text, and reversed ranges are
+configuration errors; their rejected input is not repeated in the diagnostic.
 
-## Plan, then run the selection
+## Inspect the definition, then plan
+
+Definition inspection does not enumerate a catalog of dates and does not invoke an
+asset body. It reports each selected partitioned asset's definition kind, domain,
+accepted key form, and whether a bounded range is supported.
 
 ```console
+kazeflow partitions daily.py --target publish_daily
 kazeflow plan daily.py --target publish_daily --partition-key 2026-08-08
 kazeflow run daily.py --target publish_daily --partition-key 2026-08-08 --yes
 ```
 
-Repeat `--partition-key` (or `--partition`) to select several keys:
+Plan first. The plan exposes the normalized selection kind, `date` domain, and safe
+counts, but not the selected raw values. The approved run uses the same selection.
+
+## Choose exactly one selection form
+
+For partitioned work, choose one of these forms. Omitting all selectors is an error;
+it never means today, all history, or an unbounded catalog. The forms cannot be
+combined in one plan or run.
+
+| Form | Command | Meaning |
+| --- | --- | --- |
+| Keys | `--partition-key 2026-08-08` | Select one normalized key. Repeat `--partition-key` (or its `--partition` alias) for several keys. |
+| Bounded range | `--partition-range 2026-08-08 2026-08-10` | Select the inclusive range; a date definition expands this to three normalized dates. |
+| Deliberate empty work | `--empty-partitions` | Select zero partition attempts intentionally. A partitioned task is skipped with `no_partition_keys`, rather than being an omitted configuration. |
+
+For example, repeated keys are explicit individual selections:
 
 ```console
 kazeflow plan daily.py \
@@ -37,44 +63,57 @@ kazeflow plan daily.py \
   --partition-key 2026-08-09
 ```
 
-CLI values are selected strings. kazeflow does not validate them as dates, guess a
-type, call `DatePartitionDef.range()`, or manufacture today's date. Validation inside
-an asset body happens only after approval and execution, so inspect the selection in
-the plan first.
+And a range is concise only when its finite endpoints are known:
 
-## Selection semantics
+```console
+kazeflow plan daily.py --partition-range 2026-08-08 2026-08-10
+kazeflow run daily.py --partition-range 2026-08-08 2026-08-10 --yes
+```
 
-| Input | Meaning |
-| --- | --- |
-| Omit `--partition-key` | Configuration error when the selected closure contains a partitioned asset; no asset body runs. |
-| Pass one or more keys | Request those exact textual values. |
-| Python API empty tuple | Explicitly select no partition attempts; the task aggregates as skipped. |
-| Python falsey keys | `0`, `""`, and `False` remain present Python values, not omission. CLI values are strings. |
+To review the zero-work case explicitly:
 
-## Generate a date range in Python
+```console
+kazeflow plan daily.py --empty-partitions
+```
 
-`DatePartitionDef.range()` is an explicit Python helper. Pass its returned `date`
-objects into the plan and run configuration yourself:
+If a selected closure contains no partitioned asset, every selector is a usage
+error rather than an ignored option. If it does contain one, omitting all selectors
+is a configuration error before any asset body runs.
+
+## Use ranges from Python
+
+The Python API makes the same finite, inclusive choice. `DatePartitionDef.range()`
+normalizes both endpoints and returns canonical `date` keys:
 
 ```python
 from kazeflow import DatePartitionDef, Flow, run
 
 
-keys = DatePartitionDef().range("2026-08-08", "2026-08-09")
+date_partitions = DatePartitionDef()
+keys = date_partitions.range("2026-08-08", "2026-08-10")
 config = {"partition_keys": keys}
 
 plan = Flow(["publish_daily"]).plan(config)
 result = run(["publish_daily"], config)
 ```
 
-Portable JSON and SQLite records retain whether a partition is present but omit the
-dedicated raw-key field. This is not generic redaction: exception messages and
-tracebacks can repeat the key or other application values. Treat portable records as
-potentially sensitive and use the in-memory `RunResult` when the structural key
-value itself matters. [Read the full trust boundary](concepts/trust-boundary.md).
+Custom `PartitionDef` implementations retain identity normalization by default. If a
+custom definition accepts `0`, `""`, or `False`, each is a present key—not omitted
+work. A custom definition should publish a stable domain and normalization contract
+when it needs stricter validation.
+
+## Keep the portable boundary in mind
+
+The portable **plan** JSON reports selection kind, domain, and safe counts. Portable
+run JSON and SQLite records retain only whether an attempt has a partition and omit
+the dedicated raw partition-key field. Neither is generic redaction:
+application-controlled exception messages and tracebacks can repeat a key or another
+sensitive value. Treat portable records as potentially sensitive and use the
+in-memory `RunResult` when the structural key value itself matters. [Read the full
+trust boundary](concepts/trust-boundary.md).
 
 !!! warning
 
-    Planning must load trusted Python before it can inspect the selected flow. It
-    does not ask the current Partition definition to validate CLI keys, and it does
-    not sandbox the import.
+    Planning and `kazeflow partitions` must load trusted Python before inspecting a
+    flow. Definition validation happens before asset bodies run, but it does not
+    sandbox entry loading or automatically redact application failure metadata.

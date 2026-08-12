@@ -103,6 +103,7 @@ nav:
   - CLI reference:
       - cli.md
       - assets: cli/assets.md
+      - partitions: cli/partitions.md
       - plan: cli/plan.md
       - run: cli/run.md
       - runs history: cli/history.md

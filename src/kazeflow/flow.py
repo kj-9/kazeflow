@@ -36,6 +36,7 @@ from .results import (
 
 class RunConfig(TypedDict, total=False):
     partition_keys: PartitionKeys
+    partition_range: PartitionKeys
     max_concurrency: int
 
 
@@ -120,6 +121,15 @@ class Flow:
     ) -> RunResult:
         """Execute a preflighted plan and return its terminal result."""
         plan = self.plan(run_config)
+        return await self._run_plan_async(plan, event_consumer=event_consumer)
+
+    async def _run_plan_async(
+        self,
+        plan: FlowPlan,
+        *,
+        event_consumer: ExecutionEventConsumer | None = None,
+    ) -> RunResult:
+        """Execute one already validated plan without normalizing it again."""
         self.asset_outputs = {}
         executor = _Executor(plan, self.registry, self.asset_outputs, event_consumer)
         return await executor.run()
@@ -153,12 +163,17 @@ def _plan_config(run_config: Optional[RunConfig]) -> PlanConfig:
         return PlanConfig()
     if not isinstance(run_config, dict):
         raise TypeError("run_config must be a RunConfig or None")
-    unknown = set(run_config) - {"max_concurrency", "partition_keys"}
+    unknown = set(run_config) - {
+        "max_concurrency",
+        "partition_keys",
+        "partition_range",
+    }
     if unknown:
         raise ValueError(f"unknown run configuration keys: {sorted(unknown)!r}")
     return PlanConfig(
         max_concurrency=run_config.get("max_concurrency"),
         partition_keys=run_config.get("partition_keys"),
+        partition_range=run_config.get("partition_range"),
     )
 
 

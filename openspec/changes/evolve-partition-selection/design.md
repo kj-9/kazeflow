@@ -66,8 +66,10 @@ way to associate raw inputs with branches without a mapping DSL.
 `plan` and `run` retain repeatable `--partition-key`/`--partition`, add exactly one
 `--partition-range START END`, and add `--empty-partitions`. Argparse mutual exclusion
 prevents mixed forms; omitted selection remains an error for partitioned work, and any
-selector is an error for an unpartitioned closure. `run` reuses the normalized preflight
-configuration for execution as today.
+selector is an error for an unpartitioned closure. `run` executes the already validated
+preflight `FlowPlan` through an internal core execution boundary. It does not repeat
+normalization or range expansion after human review, so stateful custom definitions
+cannot change the approved selection.
 
 `kazeflow partitions ENTRY [--target ...] [--format text|json]` selects the same closure
 as planning but inspects only definition metadata. A small planning-layer inspection
@@ -107,4 +109,3 @@ redaction of exception messages or tracebacks.
 ## Open Questions
 
 None for M16. Multiple domains and selection mappings remain an explicit future design.
-

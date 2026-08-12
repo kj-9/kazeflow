@@ -16,12 +16,14 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
         "ExecutionEventConsumer",
         "Flow",
         "FlowPlan",
+        "PartitionDef",
         "RunConfig",
         "RunResult",
         "run",
     ]
     assert kazeflow.Flow is Flow
     assert kazeflow.FlowPlan is FlowPlan
+    assert kazeflow.PartitionDef.__name__ == "PartitionDef"
     assert kazeflow.RunResult is RunResult
     assert kazeflow.EventKind is EventKind
     assert kazeflow.ExecutionEvent is ExecutionEvent
