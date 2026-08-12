@@ -34,5 +34,5 @@
   formatting/lint/typecheck, wheel metadata checks, and OpenSpec strict validation.
 - [x] 3.4 Visually inspect the built site at desktop and mobile sizes, correct visible
   navigation/content defects, and verify established public URLs in the artifact.
-- [ ] 3.5 Sync and archive the completed OpenSpec change, commit in reviewable units,
+- [x] 3.5 Sync and archive the completed OpenSpec change, commit in reviewable units,
   push, and confirm CI and GitHub Pages deployment.
