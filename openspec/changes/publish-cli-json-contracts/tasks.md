@@ -7,10 +7,10 @@
 
 ## 2. Published schemas and compatibility evidence
 
-- [ ] 2.1 Check in strict Draft 2020-12 schemas for every version-1 CLI document type, with shared portable-record definitions and distinct CLI, record, and store version fields.
-- [ ] 2.2 Check in representative normalized golden documents for every command outcome and add contract tests that validate both goldens and live CLI output against the published schemas.
+- [x] 2.1 Check in strict Draft 2020-12 schemas for every version-1 CLI document type, with shared portable-record definitions and distinct CLI, record, and store version fields.
+- [x] 2.2 Check in representative normalized golden documents for every command outcome and add contract tests that validate both goldens and live CLI output against the published schemas.
 - [ ] 2.3 Add `jsonschema` only to the development dependency group, update the lockfile, and verify that base wheel metadata still has no required third-party runtime dependencies.
-- [ ] 2.4 Extend installed-wheel smoke coverage to assert typed JSON envelopes and representative schema-compatible data without requiring schema validation at runtime.
+- [x] 2.4 Extend installed-wheel smoke coverage to assert typed JSON envelopes and representative schema-compatible data without requiring schema validation at runtime.
 
 ## 3. Hosted automation documentation
 

@@ -1,0 +1,1 @@
+{"document_type":"kazeflow.plan","schema_version":1,"data":{"targets":["publish"],"config":{"max_concurrency":1,"partition_selection":{"kind":"range","domain":"date","count":3}},"tasks":[{"name":"publish","dependencies":[],"partition_selection":{"kind":"range","domain":"date","count":3}}]}}

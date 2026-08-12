@@ -66,21 +66,31 @@ assets = subprocess.run(
     capture_output=True,
     text=True,
 )
-assert [asset["name"] for asset in json.loads(assets.stdout)["assets"]] == ["publish", "source"]
+assets_document = json.loads(assets.stdout)
+assert assets_document["document_type"] == "kazeflow.assets"
+assert assets_document["schema_version"] == 1
+assert [asset["name"] for asset in assets_document["data"]["assets"]] == ["publish", "source"]
 plan_cli = subprocess.run(
     [str(command), "plan", str(flow_file), "--format", "json"],
     check=True,
     capture_output=True,
     text=True,
 )
-assert json.loads(plan_cli.stdout)["targets"] == ["publish"]
+plan_document = json.loads(plan_cli.stdout)
+assert plan_document["document_type"] == "kazeflow.plan"
+assert plan_document["schema_version"] == 1
+assert plan_document["data"]["targets"] == ["publish"]
 run_cli = subprocess.run(
     [str(command), "run", str(flow_file), "--yes", "--format", "json"],
     check=True,
     capture_output=True,
     text=True,
 )
-assert json.loads(run_cli.stdout)["status"] == "success"
+run_document = json.loads(run_cli.stdout)
+assert run_document["document_type"] == "kazeflow.run-result"
+assert run_document["schema_version"] == 1
+assert run_document["data"]["record_schema_version"] == 1
+assert run_document["data"]["record"]["status"] == "success"
 history_directory = Path(".kazeflow")
 history_directory.mkdir()
 history_store = history_directory / "runs.sqlite3"
@@ -90,14 +100,20 @@ stored_run = subprocess.run(
     capture_output=True,
     text=True,
 )
-stored_run_id = json.loads(stored_run.stdout)["run_id"]
+stored_document = json.loads(stored_run.stdout)
+assert stored_document["document_type"] == "kazeflow.run-result"
+stored_run_id = stored_document["data"]["record"]["run_id"]
 history = subprocess.run(
     [str(command), "runs", "show", stored_run_id, "--format", "json"],
     check=True,
     capture_output=True,
     text=True,
 )
-assert json.loads(history.stdout)["run_id"] == stored_run_id
+history_document = json.loads(history.stdout)
+assert history_document["document_type"] == "kazeflow.runs-show"
+assert history_document["data"]["run_id"] == stored_run_id
+assert history_document["data"]["record_schema_version"] == 1
+assert history_document["data"]["store_schema_version"] >= 1
 """
 
 TUI_PROGRAM = """
@@ -135,7 +151,9 @@ run_cli = subprocess.run(
     capture_output=True,
     text=True,
 )
-assert json.loads(run_cli.stdout)["status"] == "success"
+run_document = json.loads(run_cli.stdout)
+assert run_document["document_type"] == "kazeflow.run-result"
+assert run_document["data"]["record"]["status"] == "success"
 assert "Overall Progress" in run_cli.stderr
 """
 

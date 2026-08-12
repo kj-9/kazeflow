@@ -567,9 +567,7 @@ def build():
     )
     explicit_entry = f"{entry}:build"
 
-    status, stdout, stderr = _run(
-        capsys, ["plan", explicit_entry, "--format", "json"]
-    )
+    status, stdout, stderr = _run(capsys, ["plan", explicit_entry, "--format", "json"])
 
     assert status == 0
     assert _json_data(stdout, "kazeflow.plan")["targets"] == ["publish"]
