@@ -20,5 +20,18 @@ kazeflow plan daily.py --partition-key 2026-08-11
 kazeflow run daily.py --partition-key 2026-08-11 --yes
 ```
 
-For several slices, repeat the option. The partition definition decides whether a
-textual key is valid; the CLI does not synthesize or coerce dates.
+For several slices, repeat the option. The current CLI accepts each value as an
+explicit string; `DatePartitionDef` does not validate or coerce it. Omitting every
+key is a configuration error before an asset body runs.
+
+Generate `date` objects through the Python API only when that is the key type your
+asset expects:
+
+```python
+keys = DatePartitionDef().range("2026-08-11", "2026-08-12")
+config = {"partition_keys": keys}
+plan = flow.plan(config)
+```
+
+See [Select partitions deliberately](../partitions.md) for empty selections,
+portable-record sensitivity, and the current validation boundary.

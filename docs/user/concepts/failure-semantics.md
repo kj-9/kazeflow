@@ -9,11 +9,22 @@ continue. Every planned task reaches a terminal classification.
 - `failed`: the asset body raised and portable failure metadata was captured.
 - `skipped`: the attempt did not run, commonly because a dependency failed or no
   partition keys were selected.
-- `cancelled`: execution was externally cancelled.
+- `cancelled`: a terminal status representable by the result and storage models.
 
 If any task fails, the flow result is failed. Cancellation is distinguished from an
 asset failure. A dependency-blocked task records its blockers rather than pretending
 to have executed.
+
+## External asyncio cancellation
+
+The current executor does not manufacture a cancelled `RunResult` when the caller
+cancels the task awaiting `Flow.run_async()`. It stops scheduling pending work,
+requests cancellation of executor-created async tasks, and re-raises
+`asyncio.CancelledError`. There is no synthetic terminal result or promised complete
+terminal event sequence to inspect in that control flow.
+
+The `cancelled` enum values remain valid model/storage states; their presence does
+not imply a public cancellation-result API.
 
 ## Partitioned work
 

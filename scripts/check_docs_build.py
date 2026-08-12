@@ -8,14 +8,38 @@ from pathlib import Path
 
 REQUIRED_PAGES = {
     "index.html": ("Make a growing script understandable before you run it", "Search"),
-    "getting-started.html": ("Proceed?", "RunResult"),
+    "getting-started.html": (
+        "Python 3.10 through 3.13",
+        "kazeflow --help",
+        "&quot;kazeflow[tui]&quot;",
+        "Proceed?",
+        "RunResult",
+        "not automatically redacted",
+    ),
     "cli.html": ("CLI reference", "kazeflow plan"),
-    "partitions.html": ("Partitions", "--partition-key"),
-    "results.html": ("Results and history", "list, show, or compare"),
+    "partitions.html": (
+        "Configuration error",
+        "DatePartitionDef.range()",
+        "not generic redaction",
+        "--partition-key",
+    ),
+    "results.html": (
+        "Results and history",
+        "list, show, or compare",
+        "other sensitive application values",
+    ),
     "cli/plan.html": ("--max-concurrency", "mermaid"),
     "cli/run.html": ("--yes", "--store PATH"),
     "api/core.html": ("kazeflow.Flow", "kazeflow.asset"),
     "api/sqlite.html": ("SQLiteRunStore", "StoredRunRecord"),
+    "concepts/failure-semantics.html": (
+        "asyncio.CancelledError",
+        "no synthetic terminal result",
+    ),
+    "concepts/trust-boundary.html": (
+        "Portable-record boundary",
+        "not sanitization, redaction, or a confidentiality guarantee",
+    ),
 }
 
 REQUIRED_SEARCH_TERMS = (
@@ -24,6 +48,8 @@ REQUIRED_SEARCH_TERMS = (
     "kazeflow run",
     "--partition-key",
     "Trust boundary",
+    "Portable-record boundary",
+    "External asyncio cancellation",
 )
 
 

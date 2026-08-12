@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M14 Complete
+> Status: M0–M14 Complete; M15 planned
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -39,6 +39,166 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M12: 実行結果のreview projectionとPartitionのユーザー導線を実装済み。
 - M13: GitHub Pagesをユーザー向けdocumentationの正本として公開し、repository内の重複guideを集約済み。
 - M14: GitHub Pagesを検索可能なMkDocs Material siteへ移行し、task guide、concept、CLI/Python reference、exampleを分離して公開済み。
+
+## Next direction: Make documentation trustworthy by construction
+
+M14で情報を発見できる構造は整った。次は、公開説明と実装の一致を人手の注意だけに依存させず、
+誤ったcommand、古いsignature、過剰な安全性表現をCIで検出できる状態へ進める。
+
+根拠となる敵対的レビューは
+[documentation-adversarial-review-2026-08-12.md](./reviews/documentation-adversarial-review-2026-08-12.md)
+に記録する。優先順位は、見た目や記事数ではなく、誤実行と誤ったtrust判断を防ぐ効果で決める。
+
+### M15: Correct behavioral and safety claims
+
+想定OpenSpec change: `correct-documentation-contracts`
+
+公開Docsを現行のpartition、cancellation、portable record契約へ一致させ、初回利用者が
+実装に存在しない挙動や機密性保証を期待しないようにする。
+
+対象:
+
+- partitioned flowではCLI selectionが必須であることと、`DatePartitionDef.range()`の役割の分離
+- structuralなpartition key省略と、failure message/traceback内のapplication value露出の区別
+- external asyncio cancellationがsyntheticな`RunResult`を返さない現行契約の明示
+- venvを含むinstall、supported Python確認、core/TUIの選択を含むfirst-run diagnostics
+- trust/privacy境界をgetting-started、Partition、result、persistenceから一貫して参照する導線
+
+完了条件:
+
+- 文書化したpartition commandが実CLIのexit statusとselection behaviorに一致する。
+- partition keyを含む例外のportable record behaviorをtestとDocsが同じ言葉で説明する。
+- cancellation説明が`core-executor-integration` living specと矛盾しない。
+- security-conscious userが、import、asset execution、failure metadata保存の3境界を区別できる。
+
+Non-goals:
+
+- implicitなpartition discovery/validationの実装
+- sandboxまたは任意Pythonの安全性保証
+- exceptionやapplication logの自動redaction
+
+### M16: Evolve partitions into a validated selection model
+
+想定OpenSpec change: `evolve-partition-selection`
+
+現状の`PartitionDef`はplannerにpartitioned taskであることを伝える印と、Python側の
+`range()` helperを兼ねているが、CLI keyの解釈・検証や複数task間のkey compatibilityには
+関与しない。明示的なreviewを保ちながら、利用者が「何を選べるか」「何が実行されるか」を
+plan前に理解できるmodelへ進化させる。
+
+対象:
+
+- `PartitionDef`がkeyのparse/normalize/validateを担うpublic contract
+- `DatePartitionDef`によるISO date key検証と、明示的なdate range selection
+- CLIからselection候補・definition種別・bounded rangeをasset実行なしでinspectする入口
+- 同一flow内のpartitioned dependency間でkey domainを共有できる条件と不一致診断
+- raw input、normalized in-memory key、portable presence-only projectionの境界
+- single key、repeatable keys、bounded range、明示的empty selectionの一貫したplan表示
+
+完了条件:
+
+- 不正なdate keyと逆転rangeをasset body実行前に診断できる。
+- planがnormalized selectionとtaskごとの適用範囲を決定的に示す。
+- partitioned dependencyへ同じnormalized keyだけが渡る既存のexactly-once semanticsを維持する。
+- falsey key、empty selection、mixed partitioned/unpartitioned dependenciesのtestsがある。
+- CLIは暗黙にtoday、全履歴、無制限rangeを選択しない。
+
+Non-goals:
+
+- dynamic partition catalogの永続化
+- multi-dimensional partition、backfill scheduler、partition mapping DSL
+- remote metadata serviceまたはdatabase
+- partition keyをsecretとして自動分類・redactすること
+
+### M17: Define versioned machine-readable CLI contracts
+
+想定OpenSpec change: `publish-cli-json-contracts`
+
+automation consumerがtext出力を解析せず、安全にversionを判定できるnormativeなJSON契約を定義する。
+互換性を実装していない部分については、契約を追加するか、公開promiseを狭めるかを先に決める。
+
+対象:
+
+- `assets`、`plan`、`run`、`runs list/show/compare`の完全なfield表とgolden example
+- commandごとのstdout/stderr、terminal asset failure、usage/load/infrastructure errorの対応
+- 全machine-readable documentに対する一貫したenvelope/schema version方針
+- JSON Schema採用の可否とalpha期間中のcompatibility/deprecation policy
+- raw output、exception object、partition value、failure metadataのportable boundary
+
+完了条件:
+
+- representativeな全command出力をchecked-in contractへ機械的に検証できる。
+- consumerがdocument単体から種類とschema versionを判定できる、または例外を明記した狭い契約がある。
+- release済みwheelに対するgolden compatibility testがある。
+
+Non-goals:
+
+- arbitrary Python outputのserialization
+- human text layoutのbyte-level固定
+- stable release以前の無期限な全schema versionサポート
+
+### M18: Execute critical documentation journeys in CI
+
+想定OpenSpec change: `test-published-documentation`
+
+単語の存在確認から、built wheelを使ったend-to-end documentation contractへ検証を進化させる。
+M15で正したbehavior、M16で進化させたpartition selection、M17で決めたJSON契約をCIの期待値にする。
+
+対象:
+
+- canonical example fileまたは安全に抽出できるfenced snippetのsingle source化
+- isolated temporary directoryでのinstall、plan、approved run、partition、store/history journey
+- exit status、stdout/stderr分離、golden JSON、主要text semanticsの検証
+- public API/CLI source、examples、version/release入力を含むPages path trigger
+- main CIからも見えるrequired documentation validation job
+
+完了条件:
+
+- 間違ったoption、欠けたpartition selection、stale signature、壊れた内部linkがPRで失敗する。
+- public source変更がstrict buildとPages再生成を必ず起動する。
+- PagesへdeployするartifactがPR/mainで検証したものと同じbuild procedureから得られる。
+
+Non-goals:
+
+- arbitraryな全Markdown code fenceの実行
+- network serviceやcredentialを必要とするexampleのCI実行
+- user-supplied Python codeの実行
+
+### M19: Harden release documentation delivery
+
+想定OpenSpec change: `harden-documentation-release`
+
+package releaseと公開siteのversion driftをなくし、外部resource/privacy方針を明示する。
+M18のsource-aware deploymentを前提に、release時の再現性を仕上げる。
+
+対象:
+
+- package metadataを唯一のversion sourceとするsite label生成または厳格な一致check
+- release notes、compatibility page、PyPI project URLs、Pages navigationのrelease checklist統合
+- system fontまたはself-hosted fontへの移行とthird-party requestの削減
+- live Pagesのversion、主要URL、search index、generated API signatureのpost-deploy smoke test
+
+完了条件:
+
+- package versionを変更すると全site labelが自動更新されるか、不一致でCIが失敗する。
+- generated HTMLが合意した外部resource/privacy方針に従う。
+- release後にPyPI、repository、Pages間のversionと導線を自動確認できる。
+
+Non-goals:
+
+- stable release前のmulti-version documentation hosting
+- MkDocs以外への再移行
+- analytics、tracking、documentation SaaSの導入
+
+依存関係:
+
+```text
+M15 truthful behavior and safety
+  └─> M16 validated partition selection
+        └─> M17 versioned automation contracts
+              └─> M18 executable docs CI and source-aware deployment
+                    └─> M19 release and delivery hardening
+```
 
 ### M14: Build a searchable software documentation system
 

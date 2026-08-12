@@ -28,7 +28,10 @@ kazeflow runs compare LEFT_RUN_ID RIGHT_RUN_ID \
 ```
 
 Comparison preserves left/right argument order and compares run and task aggregates.
-It does not claim to match raw partition keys because those values are not stored.
+It does not match dedicated raw partition-key fields because those fields are not
+stored. Failure messages and tracebacks remain application-controlled and can repeat
+the same values; stored records are not automatically redacted. See the
+[portable-record trust boundary](../concepts/trust-boundary.md#portable-record-boundary).
 
 ```console
 $ kazeflow runs list

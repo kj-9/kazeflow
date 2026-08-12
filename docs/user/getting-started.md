@@ -9,17 +9,37 @@ The normal kazeflow workflow is short:
 
 ## 1. Install
 
-The core has no required runtime dependency:
+kazeflow supports Python 3.10 through 3.13. Check the interpreter, then create an
+isolated environment:
+
+=== "macOS / Linux"
+
+    ```console
+    python3 --version
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
+
+=== "Windows PowerShell"
+
+    ```powershell
+    py --version
+    py -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    ```
+
+Install and verify the core. It has no required third-party runtime dependency:
 
 ```console
-pip install kazeflow
+python -m pip install kazeflow
+kazeflow --help
 ```
 
 Install Rich only when you want the optional progress display. Keep the quotes in
 shells such as zsh:
 
 ```console
-pip install "kazeflow[tui]"
+python -m pip install "kazeflow[tui]"
 ```
 
 ## 2. Declare a flow
@@ -88,7 +108,8 @@ kazeflow run daily.py --yes
 ```
 
 Use `--format json` when another program needs one portable result document rather
-than human-oriented text.
+than human-oriented text. Portable failure messages and tracebacks can contain
+application values, so JSON is structurally limited but not automatically redacted.
 
 ## 5. Review the before and after
 

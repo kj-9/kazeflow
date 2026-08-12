@@ -27,8 +27,13 @@ kazeflow run daily.py --yes
 ## Result modes
 
 Text prints the run ID, status, duration, and each task outcome. `--verbose` adds
-safe attempt-level detail. `--format json` writes one portable result document to
-standard output while preflight and diagnostics remain on standard error.
+structurally limited attempt detail. `--format json` writes one portable result
+document to standard output while preflight and diagnostics remain on standard
+error.
+
+Portable output omits dedicated raw-key fields and arbitrary task outputs, but
+failure messages and tracebacks can contain sensitive application values. See the
+[portable-record trust boundary](../concepts/trust-boundary.md#portable-record-boundary).
 
 ## Optional adapters
 

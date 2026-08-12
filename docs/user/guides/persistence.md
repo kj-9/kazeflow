@@ -26,7 +26,13 @@ missing history database. Use `--store PATH` to read another existing file.
 
 The SQLite adapter stores run/task/attempt order, terminal statuses, UTC timestamps,
 durations, skip reasons, blockers, and portable failure metadata. It deliberately
-omits raw task outputs, exception objects, and raw partition-key values.
+omits raw task outputs, exception objects, and the dedicated raw partition-key field.
+
+This is not a confidentiality or redaction guarantee. Exception messages and
+tracebacks are stored as portable failure metadata and can contain partition keys,
+paths, queries, or other application-controlled values. Protect the database as
+diagnostic data and review the
+[portable-record trust boundary](../concepts/trust-boundary.md#portable-record-boundary).
 
 See [Results and history](../results.md) for the record model and
 [SQLiteRunStore](../api/sqlite.md) for the direct Python API.

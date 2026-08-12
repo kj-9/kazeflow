@@ -22,8 +22,14 @@ the caller. Task and partition-attempt results remain in deterministic plan and
 selection order.
 
 `RunResult.to_record()` creates a new JSON-friendly projection. It omits arbitrary
-outputs, raw exception objects, and partition key values. It does not write a file
-or promise durable history.
+outputs, raw exception objects, and the dedicated raw partition-key field. It does
+not write a file or promise durable history. Its portable exception messages and
+tracebacks can still contain application-controlled values; see the
+[portable-record trust boundary](trust-boundary.md#portable-record-boundary).
+
+External cancellation is different from a normally completed result. Cancelling the
+task awaiting `Flow.run_async()` propagates `asyncio.CancelledError` without a
+synthetic terminal `RunResult` or complete terminal event sequence.
 
 ## Events do not own execution
 

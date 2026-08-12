@@ -13,8 +13,9 @@ kazeflow run daily.py --yes --format json
 
 Text includes run ID, overall status and duration, then tasks in plan order. Failed
 tasks include portable exception type/message; skipped tasks include a reason.
-`--verbose` adds ordered attempt detail without raw keys, outputs, exception objects,
-or tracebacks.
+`--verbose` adds ordered attempt detail without dedicated raw-key fields, outputs,
+exception objects, or tracebacks. Failure messages shown in normal text remain
+application-controlled and can repeat those values.
 
 ## In-memory Python result
 
@@ -39,8 +40,14 @@ run.
 | --- | --- |
 | Run/task/attempt order and statuses | Raw task outputs |
 | UTC timestamps and durations | Raw exception objects |
-| Skip reasons and dependency blockers | Raw partition-key values |
+| Skip reasons and dependency blockers | Dedicated raw partition-key fields |
 | Portable failure metadata | Reconstructed `RunResult` objects |
+
+This table describes structural fields, not redaction. Portable failure metadata
+contains exception messages and tracebacks, which can include partition keys or
+other sensitive application values. Treat JSON and SQLite records as potentially
+sensitive. See
+the [portable-record trust boundary](concepts/trust-boundary.md#portable-record-boundary).
 
 Use [SQLite persistence](guides/persistence.md) to opt in and the
 [`runs` reference](cli/history.md) to list, show, or compare records.
