@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M14 Complete; M15 planned
+> Status: M0–M15 Complete; M16 planned
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -39,6 +39,7 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M12: 実行結果のreview projectionとPartitionのユーザー導線を実装済み。
 - M13: GitHub Pagesをユーザー向けdocumentationの正本として公開し、repository内の重複guideを集約済み。
 - M14: GitHub Pagesを検索可能なMkDocs Material siteへ移行し、task guide、concept、CLI/Python reference、exampleを分離して公開済み。
+- M15: Partition、portable record、external cancellationの公開説明を現行契約へ修正し、behavioral evidenceと初回環境診断を追加済み。
 
 ## Next direction: Make documentation trustworthy by construction
 

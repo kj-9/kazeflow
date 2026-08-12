@@ -42,6 +42,6 @@
   `make docs-check`, and visually inspect the affected desktop/mobile journeys.
 - [x] 5.2 Run `make test`, `make ci-check`, wheel metadata/core smoke checks,
   `git diff --check`, `openspec doctor`, and `openspec validate --all --strict`.
-- [ ] 5.3 Verify implementation against the change artifacts, sync the delta to the
+- [x] 5.3 Verify implementation against the change artifacts, sync the delta to the
   hosted-user-documentation living spec, archive the change, commit in reviewable
   units, push, and confirm CI plus the corrected public Pages content.
