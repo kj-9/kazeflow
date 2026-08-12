@@ -26,6 +26,16 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, str,
     return status, captured.out, captured.err
 
 
+def _json_data(stdout: str, document_type: str) -> dict[str, object]:
+    document = json.loads(stdout)
+    assert document == {
+        "document_type": document_type,
+        "schema_version": 1,
+        "data": document["data"],
+    }
+    return document["data"]
+
+
 class _TTY(io.StringIO):
     def isatty(self) -> bool:
         return True
@@ -60,8 +70,7 @@ flow = Flow(['publish'])
 
     assert status == 0
     assert stderr == ""
-    assets = json.loads(stdout)
-    assert assets["schema_version"] == 1
+    assets = _json_data(stdout, "kazeflow.assets")
     assert assets["declared_flow"] is True
     assert [asset["name"] for asset in assets["assets"]] == [
         "publish",
@@ -76,8 +85,7 @@ flow = Flow(['publish'])
 
     assert status == 0
     assert stderr == ""
-    plan = json.loads(stdout)
-    assert plan["schema_version"] == 1
+    plan = _json_data(stdout, "kazeflow.plan")
     assert plan["targets"] == ["publish"]
     assert plan["config"] == {
         "max_concurrency": 2,
@@ -120,7 +128,7 @@ def transform(extract):
 
     assert status == 0
     assert stderr == ""
-    plan = json.loads(stdout)
+    plan = _json_data(stdout, "kazeflow.plan")
     assert plan["targets"] == ["transform"]
     assert [task["name"] for task in plan["tasks"]] == ["extract", "transform"]
 
@@ -152,7 +160,7 @@ def beta(common):
 
     assert status == 0
     assert stderr == ""
-    assert json.loads(stdout)["targets"] == ["alpha", "beta"]
+    assert _json_data(stdout, "kazeflow.plan")["targets"] == ["alpha", "beta"]
 
     status, stdout, stderr = _run(
         capsys, ["plan", str(entry), "--target", "beta", "--format", "json"]
@@ -160,7 +168,7 @@ def beta(common):
 
     assert status == 0
     assert stderr == ""
-    plan = json.loads(stdout)
+    plan = _json_data(stdout, "kazeflow.plan")
     assert plan["targets"] == ["beta"]
     assert [task["name"] for task in plan["tasks"]] == ["common", "beta"]
 
@@ -226,7 +234,7 @@ flow = Flow(['publish'])
 
     assert status == 0
     assert stderr == ""
-    plan = json.loads(stdout)
+    plan = _json_data(stdout, "kazeflow.plan")
     assert plan["config"]["partition_selection"] == {
         "kind": "keys",
         "domain": "date",
@@ -495,6 +503,91 @@ def never_run():
     assert "run cancelled" in stderr.getvalue()
 
 
+def test_json_run_decline_emits_a_typed_no_op_document(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _script(
+        tmp_path,
+        "declined_json.py",
+        """
+from kazeflow import asset
+
+@asset
+def never_run():
+    raise AssertionError('asset body must not run')
+""",
+    )
+    stdin = _TTY("no\n")
+    stderr = _TTY()
+    monkeypatch.setattr(cli.sys, "stdin", stdin)
+    monkeypatch.setattr(cli.sys, "stderr", stderr)
+    monkeypatch.setattr(cli, "_execute", lambda *_args, **_kwargs: pytest.fail("run"))
+    monkeypatch.setattr(
+        cli, "_save_result", lambda *_args, **_kwargs: pytest.fail("store")
+    )
+
+    status = main(
+        [
+            "run",
+            str(entry),
+            "--format",
+            "json",
+            "--tui",
+            "--store",
+            str(tmp_path / "run.db"),
+        ]
+    )
+    stdout = capsys.readouterr().out
+
+    assert status == 0
+    assert _json_data(stdout, "kazeflow.run-declined") == {"reason": "not_approved"}
+    assert not (tmp_path / "run.db").exists()
+    assert "run cancelled" in stderr.getvalue()
+
+
+def test_json_mode_routes_entry_factory_and_asset_stdout_to_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "noisy.py",
+        """
+print("entry noise")
+from kazeflow import Flow, asset
+
+@asset
+def publish():
+    print("asset noise")
+    return "private output"
+
+def build():
+    print("factory noise")
+    return Flow(["publish"])
+""",
+    )
+    explicit_entry = f"{entry}:build"
+
+    status, stdout, stderr = _run(
+        capsys, ["plan", explicit_entry, "--format", "json"]
+    )
+
+    assert status == 0
+    assert _json_data(stdout, "kazeflow.plan")["targets"] == ["publish"]
+    assert "entry noise" in stderr
+    assert "factory noise" in stderr
+    assert "asset noise" not in stderr
+
+    status, stdout, stderr = _run(
+        capsys, ["run", explicit_entry, "--yes", "--format", "json"]
+    )
+
+    assert status == 0
+    assert _json_data(stdout, "kazeflow.run-result")["record"]["status"] == "success"
+    assert "entry noise" in stderr
+    assert "factory noise" in stderr
+    assert "asset noise" in stderr
+
+
 def test_run_requires_yes_without_a_terminal_and_does_not_invoke_assets(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -543,7 +636,9 @@ def publish():
     )
 
     assert status == 0
-    record = json.loads(stdout)
+    run = _json_data(stdout, "kazeflow.run-result")
+    assert run["record_schema_version"] == 1
+    record = run["record"]
     assert record["status"] == "success"
     assert "raw output must not be serialized" not in stdout
     assert "Planned run:" in stderr
@@ -570,7 +665,7 @@ def broken():
     )
 
     assert status == 1
-    assert json.loads(stdout)["status"] == "failed"
+    assert _json_data(stdout, "kazeflow.run-result")["record"]["status"] == "failed"
     assert "Planned run:" in stderr
 
 
@@ -745,7 +840,7 @@ def publish():
 
     assert status == 0
     assert "Planned run:" in stderr
-    record = json.loads(stdout)
+    record = _json_data(stdout, "kazeflow.run-result")["record"]
     with SQLiteRunStore(database) as store:
         assert store.load(record["run_id"]).record == record
 
@@ -840,7 +935,7 @@ flow = Flow(['publish'])
     )
 
     assert status == 0
-    assert json.loads(stdout)["status"] == "success"
+    assert _json_data(stdout, "kazeflow.run-result")["record"]["status"] == "success"
     assert "Planned run:" in stderr
     assert "Overall Progress" in stderr
 
@@ -866,7 +961,7 @@ def publish():
         ["run", str(entry), "--yes", "--store", str(store_path), "--format", "json"],
     )
     assert status == 0
-    run_id = json.loads(stdout)["run_id"]
+    run_id = _json_data(stdout, "kazeflow.run-result")["record"]["run_id"]
 
     monkeypatch.chdir(tmp_path)
     status, stdout, stderr = _run(
@@ -875,10 +970,9 @@ def publish():
 
     assert status == 0
     assert stderr == ""
-    history = json.loads(stdout)
-    assert history["schema_version"] == 1
+    history = _json_data(stdout, "kazeflow.runs-list")
     assert history["runs"][0]["run_id"] == run_id
-    assert history["runs"][0]["schema_version"] == 1
+    assert history["runs"][0]["record_schema_version"] == 1
     assert history["runs"][0]["status"] == "success"
     assert history["runs"][0]["saved_at"].endswith("+00:00")
 
@@ -914,13 +1008,13 @@ def publish():
         ["run", str(success), "--yes", "--store", str(database), "--format", "json"],
     )
     assert status == 0
-    success_id = json.loads(stdout)["run_id"]
+    success_id = _json_data(stdout, "kazeflow.run-result")["record"]["run_id"]
     status, stdout, _stderr = _run(
         capsys,
         ["run", str(failure), "--yes", "--store", str(database), "--format", "json"],
     )
     assert status == 1
-    failure_id = json.loads(stdout)["run_id"]
+    failure_id = _json_data(stdout, "kazeflow.run-result")["record"]["run_id"]
 
     status, stdout, stderr = _run(
         capsys,
@@ -928,8 +1022,10 @@ def publish():
     )
     assert status == 0
     assert stderr == ""
-    shown = json.loads(stdout)
+    shown = _json_data(stdout, "kazeflow.runs-show")
     assert shown["run_id"] == success_id
+    assert shown["record_schema_version"] == 1
+    assert shown["store_schema_version"] == 1
     assert shown["record"]["tasks"][0]["attempts"][0]["attempt"]["partition"] == {
         "present": False
     }
@@ -950,7 +1046,7 @@ def publish():
     )
     assert status == 0
     assert stderr == ""
-    compared = json.loads(stdout)
+    compared = _json_data(stdout, "kazeflow.runs-compare")
     assert compared["left"]["run_id"] == failure_id
     assert compared["right"]["run_id"] == success_id
     task = compared["comparison"]["tasks"][0]
@@ -1022,8 +1118,7 @@ flow = Flow(["summary"])
 
     assert status == 0
     assert stderr == ""
-    assert json.loads(stdout) == {
-        "schema_version": 1,
+    assert _json_data(stdout, "kazeflow.partitions") == {
         "targets": ["summary"],
         "partitions": [
             {
@@ -1092,7 +1187,7 @@ flow = Flow(["publish"])
 
     assert status == 0
     assert stderr == ""
-    plan = json.loads(stdout)
+    plan = _json_data(stdout, "kazeflow.plan")
     assert plan["config"]["partition_selection"] == {
         "kind": "range",
         "domain": "date",
@@ -1131,7 +1226,7 @@ flow = Flow(["publish"])
 
     assert status == 0
     assert stderr == ""
-    assert json.loads(stdout)["config"]["partition_selection"] == {
+    assert _json_data(stdout, "kazeflow.plan")["config"]["partition_selection"] == {
         "kind": "empty",
         "domain": "date",
         "count": 0,

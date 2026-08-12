@@ -1,9 +1,9 @@
 ## 1. JSON projection and stream integrity
 
-- [ ] 1.1 Add a shared typed-envelope projection in `src/kazeflow/cli.py` and migrate assets, partitions, plan, completed run, and history JSON output to their documented version-1 document types.
-- [ ] 1.2 Route ordinary `sys.stdout` writes from entry loading, explicit factories, and approved asset execution to stderr in JSON mode without changing text, Mermaid, or DOT behavior.
-- [ ] 1.3 Emit a typed declined-run document on interactive JSON decline and preserve the documented exit/document matrix for completed failures and CLI errors.
-- [ ] 1.4 Extend `tests/test_cli.py` with all document types, noisy entry/factory/asset cases, decline, adapter failure, version separation, portable-data boundaries, and deterministic ordering.
+- [x] 1.1 Add a shared typed-envelope projection in `src/kazeflow/cli.py` and migrate assets, partitions, plan, completed run, and history JSON output to their documented version-1 document types.
+- [x] 1.2 Route ordinary `sys.stdout` writes from entry loading, explicit factories, and approved asset execution to stderr in JSON mode without changing text, Mermaid, or DOT behavior.
+- [x] 1.3 Emit a typed declined-run document on interactive JSON decline and preserve the documented exit/document matrix for completed failures and CLI errors.
+- [x] 1.4 Extend `tests/test_cli.py` with all document types, noisy entry/factory/asset cases, decline, adapter failure, version separation, portable-data boundaries, and deterministic ordering.
 
 ## 2. Published schemas and compatibility evidence
 

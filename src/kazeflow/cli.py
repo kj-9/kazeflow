@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import redirect_stdout
 import importlib
 import importlib.util
 import json
@@ -29,6 +30,8 @@ EXIT_USAGE = 2
 EXIT_ENTRY = 3
 EXIT_INFRASTRUCTURE = 4
 _DEFAULT_HISTORY_STORE = Path(".kazeflow") / "runs.sqlite3"
+_CLI_DOCUMENT_SCHEMA_VERSION = 1
+_PORTABLE_RECORD_SCHEMA_VERSION = 1
 
 
 class _UsageError(Exception):
@@ -150,16 +153,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         _validate_output_selection(args)
         _validate_entry_syntax(args.entry)
         if args.command == "assets":
-            loaded = _load_entry(args.entry)
+            loaded = _load_entry_for_output(args.entry, args.format)
             _emit_assets(loaded, args.format)
         elif args.command == "partitions":
-            loaded = _load_entry(args.entry)
+            loaded = _load_entry_for_output(args.entry, args.format)
             _emit_partitions(loaded, args)
         elif args.command == "plan":
-            loaded = _load_entry(args.entry)
+            loaded = _load_entry_for_output(args.entry, args.format)
             _emit_plan(loaded, args)
         else:
-            loaded = _load_entry(args.entry)
+            loaded = _load_entry_for_output(args.entry, args.format)
             return _run_selected(loaded, args)
     except _UsageError as error:
         _diagnostic(str(error))
@@ -224,6 +227,14 @@ def _load_entry(entry: str) -> _LoadedEntry:
     if is_file:
         _localize_default_registry(flow, discovered)
     return _LoadedEntry(flow, discovered)
+
+
+def _load_entry_for_output(entry: str, output_format: str) -> _LoadedEntry:
+    """Load trusted entry Python without permitting it to corrupt JSON stdout."""
+    if output_format != "json":
+        return _load_entry(entry)
+    with redirect_stdout(sys.stderr):
+        return _load_entry(entry)
 
 
 def _load_module(name: str) -> tuple[ModuleType, tuple[Asset, ...]]:
@@ -316,12 +327,12 @@ def _emit_assets(loaded: _LoadedEntry, output_format: str) -> None:
         _asset_record(asset) for asset in sorted(assets, key=lambda asset: asset.name)
     ]
     if output_format == "json":
-        _json_output(
+        _emit_json_document(
+            "kazeflow.assets",
             {
-                "schema_version": 1,
                 "declared_flow": loaded.flow is not None,
                 "assets": records,
-            }
+            },
         )
         return
     print("Assets:")
@@ -336,7 +347,7 @@ def _emit_assets(loaded: _LoadedEntry, output_format: str) -> None:
 def _emit_plan(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
     selected = _select_run(loaded, args)
     if args.format == "json":
-        _json_output(_plan_record(selected.plan))
+        _emit_json_document("kazeflow.plan", _plan_record(selected.plan))
         return
     if args.format == "mermaid":
         _mermaid_plan(selected.plan)
@@ -355,12 +366,12 @@ def _emit_partitions(loaded: _LoadedEntry, args: argparse.Namespace) -> None:
     # the single-domain invariant. An empty selection performs no asset work.
     flow.plan({"partition_keys": []} if records else None)
     if args.format == "json":
-        _json_output(
+        _emit_json_document(
+            "kazeflow.partitions",
             {
-                "schema_version": 1,
                 "targets": list(flow.targets),
                 "partitions": records,
-            }
+            },
         )
         return
     if not records:
@@ -415,9 +426,15 @@ def _run_selected(loaded: _LoadedEntry, args: argparse.Namespace) -> int:
     _text_plan(selected.plan, file=sys.stderr, heading="Planned run:")
 
     if not _approved(args.yes):
+        if args.format == "json":
+            _emit_json_document("kazeflow.run-declined", {"reason": "not_approved"})
         return EXIT_SUCCESS
 
-    result = _execute(selected, use_tui=args.tui)
+    if args.format == "json":
+        with redirect_stdout(sys.stderr):
+            result = _execute(selected, use_tui=args.tui)
+    else:
+        result = _execute(selected, use_tui=args.tui)
     _save_result(result, args.store)
     _emit_result(result, args.format, verbose=args.verbose, store_path=args.store)
     return EXIT_SUCCESS if result.status.value == "success" else 1
@@ -478,7 +495,13 @@ def _emit_result(
     store_path: str | None = None,
 ) -> None:
     if output_format == "json":
-        _json_output(result.to_record())
+        _emit_json_document(
+            "kazeflow.run-result",
+            {
+                "record_schema_version": _PORTABLE_RECORD_SCHEMA_VERSION,
+                "record": result.to_record(),
+            },
+        )
         return
     print("Run result:")
     print(f"- run_id: {result.run_id}")
@@ -598,7 +621,7 @@ def _run_history(args: argparse.Namespace) -> int:
 def _history_summary(summary: Any) -> dict[str, Any]:
     return {
         "run_id": summary.run_id,
-        "schema_version": summary.schema_version,
+        "record_schema_version": summary.schema_version,
         "status": summary.status,
         "saved_at": summary.saved_at.isoformat(),
     }
@@ -607,7 +630,7 @@ def _history_summary(summary: Any) -> dict[str, Any]:
 def _history_envelope(stored: Any, store_schema_version: int) -> dict[str, Any]:
     return {
         "run_id": stored.run_id,
-        "schema_version": stored.schema_version,
+        "record_schema_version": stored.schema_version,
         "status": stored.status,
         "saved_at": stored.saved_at.isoformat(),
         "store_schema_version": store_schema_version,
@@ -618,7 +641,7 @@ def _history_envelope(stored: Any, store_schema_version: int) -> dict[str, Any]:
 def _emit_history_list(summaries: Sequence[Any], output_format: str) -> None:
     records = [_history_summary(summary) for summary in summaries]
     if output_format == "json":
-        _json_output({"schema_version": 1, "runs": records})
+        _emit_json_document("kazeflow.runs-list", {"runs": records})
         return
     if not records:
         print("No stored runs.")
@@ -627,7 +650,7 @@ def _emit_history_list(summaries: Sequence[Any], output_format: str) -> None:
     for record in records:
         print(
             f"- {record['run_id']} ({record['status']}; saved_at: {record['saved_at']}; "
-            f"schema: {record['schema_version']})"
+            f"record schema: {record['record_schema_version']})"
         )
 
 
@@ -636,7 +659,7 @@ def _emit_history_show(
 ) -> None:
     envelope = _history_envelope(stored, store_schema_version)
     if output_format == "json":
-        _json_output(envelope)
+        _emit_json_document("kazeflow.runs-show", envelope)
         return
     print("Stored run:")
     print(f"- run_id: {envelope['run_id']}")
@@ -708,13 +731,12 @@ def _emit_history_compare(
     left: Any, right: Any, store_schema_version: int, output_format: str
 ) -> None:
     record = {
-        "schema_version": 1,
         "left": _history_envelope(left, store_schema_version),
         "right": _history_envelope(right, store_schema_version),
         "comparison": _history_comparison(left, right),
     }
     if output_format == "json":
-        _json_output(record)
+        _emit_json_document("kazeflow.runs-compare", record)
         return
     print("Run comparison:")
     print(f"- left: {left.run_id} ({left.status})")
@@ -841,7 +863,6 @@ def _task_selection_record(task: Any, *, selection_kind: str) -> dict[str, Any]:
 
 def _plan_record(plan: FlowPlan) -> dict[str, Any]:
     return {
-        "schema_version": 1,
         "targets": list(plan.targets),
         "config": {
             "max_concurrency": plan.config.max_concurrency,
@@ -991,6 +1012,16 @@ def _dot_plan(plan: FlowPlan) -> None:
 
 def _json_output(value: dict[str, Any]) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def _emit_json_document(document_type: str, data: dict[str, Any]) -> None:
+    _json_output(
+        {
+            "document_type": document_type,
+            "schema_version": _CLI_DOCUMENT_SCHEMA_VERSION,
+            "data": data,
+        }
+    )
 
 
 def _diagnostic(message: str) -> None:
