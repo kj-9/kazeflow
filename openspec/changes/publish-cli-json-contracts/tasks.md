@@ -9,7 +9,7 @@
 
 - [x] 2.1 Check in strict Draft 2020-12 schemas for every version-1 CLI document type, with shared portable-record definitions and distinct CLI, record, and store version fields.
 - [x] 2.2 Check in representative normalized golden documents for every command outcome and add contract tests that validate both goldens and live CLI output against the published schemas.
-- [ ] 2.3 Add `jsonschema` only to the development dependency group, update the lockfile, and verify that base wheel metadata still has no required third-party runtime dependencies.
+- [x] 2.3 Add `jsonschema` only to the development dependency group, update the lockfile, and verify that base wheel metadata still has no required third-party runtime dependencies.
 - [x] 2.4 Extend installed-wheel smoke coverage to assert typed JSON envelopes and representative schema-compatible data without requiring schema validation at runtime.
 
 ## 3. Hosted automation documentation
@@ -20,7 +20,7 @@
 
 ## 4. Integration and release evidence
 
-- [ ] 4.1 Run focused CLI/schema/documentation tests, `make test`, `make ci-check`, `make docs-check`, and strict OpenSpec validation.
-- [ ] 4.2 Build the distribution and run core-only plus optional-TUI wheel smoke tests across the supported packaging checks.
+- [x] 4.1 Run focused CLI/schema/documentation tests, `make test`, `make ci-check`, `make docs-check`, and strict OpenSpec validation.
+- [x] 4.2 Build the distribution and run core-only plus optional-TUI wheel smoke tests across the supported packaging checks.
 - [ ] 4.3 Perform an adversarial implementation review, resolve contract or regression findings, and record verification evidence.
 - [ ] 4.4 Mark tasks complete, sync/archive the OpenSpec change serially, update M17 roadmap status, and commit/push the completed milestone in reviewable units.

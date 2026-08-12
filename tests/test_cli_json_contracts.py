@@ -19,7 +19,7 @@ _SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v1/schema.json"
 _GOLDENS = _ROOT / "tests/fixtures/cli-json/v1"
 
 
-def _validator() -> Draft202012Validator:
+def _validator() -> Any:
     schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
@@ -164,11 +164,7 @@ def publish():
     )
     assert status == 0
     validator.validate(plan_range)
-    # Use the smallest possible partitioned closure for the range/empty goldens.
-    assert (
-        plan_range["data"]["config"]["partition_selection"]
-        == _golden("plan-range.json")["data"]["config"]["partition_selection"]
-    )
+    assert plan_range == _golden("plan-range.json")
 
     status, plan_empty, _ = _run(
         capsys,
@@ -176,10 +172,7 @@ def publish():
     )
     assert status == 0
     validator.validate(plan_empty)
-    assert (
-        plan_empty["data"]["config"]["partition_selection"]
-        == _golden("plan-empty.json")["data"]["config"]["partition_selection"]
-    )
+    assert plan_empty == _golden("plan-empty.json")
 
     simple_entry = _script(
         tmp_path,

@@ -6,6 +6,7 @@ import json
 import io
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,7 +27,7 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, str,
     return status, captured.out, captured.err
 
 
-def _json_data(stdout: str, document_type: str) -> dict[str, object]:
+def _json_data(stdout: str, document_type: str) -> dict[str, Any]:
     document = json.loads(stdout)
     assert document == {
         "document_type": document_type,
