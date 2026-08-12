@@ -5,7 +5,7 @@ hide:
 
 <div class="hero" markdown>
 
-<span class="release-badge">Latest alpha · 0.1.0a3</span>
+<span class="release-badge">Latest alpha · 0.1.0a4</span>
 
 # Make a growing script understandable before you run it.
 

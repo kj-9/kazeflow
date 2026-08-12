@@ -11,6 +11,30 @@ Before a compatible release removes or renames a documented CLI command or optio
 the project will publish a deprecation, a migration path, and a release note.
 Breaking CLI changes require an explicitly documented pre-1.0 compatibility boundary.
 
+## 0.1.0a4: Validated partitions and typed automation output
+
+- Partition definitions now own CLI key parsing and normalization. Date partitions
+  accept strict ISO dates, bounded inclusive ranges, and explicit empty selections;
+  invalid keys, reversed ranges, and incompatible dependency domains fail before an
+  asset body is invoked.
+- `kazeflow partitions` inspects partition definition kind, domain, key format, and
+  range support without executing assets. Plan and graph projections expose safe
+  selection metadata while continuing to omit raw partition keys.
+- Every completed `--format json` outcome now uses the typed envelope
+  `{document_type, schema_version, data}`. Interactive declines have their own
+  `kazeflow.run-declined` document, and completed asset failures remain structured
+  `kazeflow.run-result` documents with exit status `1`.
+- JSON mode routes ordinary output from entry modules, explicit factories, and asset
+  bodies to stderr so stdout remains one parseable document. This is stream routing
+  for trusted Python, not a sandbox or redaction guarantee.
+- Draft 2020-12 JSON Schemas, normalized golden examples, and installed-wheel
+  compatibility checks now cover all public machine-readable CLI commands.
+- GitHub Pages is the user-documentation source of truth, with searchable task,
+  concept, CLI, Partition, result/history, trust-boundary, and automation references.
+
+This is an alpha-breaking JSON migration: consumers of `0.1.0a3` JSON must read the
+new typed envelope and explicitly accept each `(document_type, schema_version)` pair.
+
 ## 0.1.0a3: CLI review workflow
 
 - `kazeflow plan` presents a concise graph-oriented text review by default.

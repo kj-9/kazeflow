@@ -1,6 +1,6 @@
 # Release and compatibility
 
-<span class="release-badge">Latest alpha · 0.1.0a3</span>
+<span class="release-badge">Latest alpha · 0.1.0a4</span>
 
 kazeflow is currently an alpha package. The public CLI review workflow and structured
 plan/result model are available, but incompatible changes can still occur before a

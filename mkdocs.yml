@@ -78,7 +78,7 @@ extra_css:
   - stylesheets/extra.css
 
 extra:
-  release: 0.1.0a3
+  release: 0.1.0a4
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/kj-9/kazeflow
@@ -121,4 +121,4 @@ nav:
       - Partition rerun: examples/partition-rerun.md
       - Failure investigation: examples/failure-investigation.md
   - Results and history: results.md
-  - Release 0.1.0a3: releases/compatibility.md
+  - Release 0.1.0a4: releases/compatibility.md
