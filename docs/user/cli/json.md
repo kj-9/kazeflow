@@ -77,14 +77,25 @@ the command-oriented field reference.
 | `kazeflow.runs-show` | `run_id`, `record_schema_version`, `status`, `saved_at`, `store_schema_version`, and portable `record`. |
 | `kazeflow.runs-compare` | `left`, `right`, and `comparison`. `left` and `right` use the stored-run shape; `comparison` has flow deltas and ordered task aggregate comparisons. |
 
+`partition_selection.kind` is one of `omitted`, `keys`, `range`, `empty`, or
+`unpartitioned`; `domain` and `count` are nullable only where that kind has no
+partitioned selection. `max_concurrency` is a positive integer or `null`.
+
 ### Portable record shape
 
 The nested `record` in `run-result` and `runs-show` retains `run_id`, flow `status`,
 UTC `started_at`/`ended_at`, `duration_seconds`, and ordered `tasks`. A task retains
-its task reference, terminal `status`, `reason`, `blocked_by`, and ordered `attempts`.
-An attempt retains its reference, status, timestamps, duration, reason, blockers,
-and nullable portable `failure`. Failure metadata contains `exception_type`,
-`message`, and `traceback`.
+`task.task_name`, `is_partitioned`, terminal `status`, timestamps, duration,
+nullable `reason`, `blocked_by`, and ordered `attempts`. An attempt retains its
+`attempt.task.task_name`, structural `attempt.partition.present` boolean, status,
+timestamps, duration, nullable reason, blockers, and nullable portable `failure`.
+Failure metadata contains `exception_type`, `message`, and `traceback`.
+
+`comparison` contains `status_changed`, `duration_seconds_delta`,
+`task_count_delta`, and ordered `tasks`. Each task comparison has `task_name`,
+nullable `left`/`right` task summaries, and `changed`; a present summary has
+`is_partitioned`, `status`, `reason`, attempt counts, status counts,
+`failure_present`, and `failure_exception_types`.
 
 For exact nullability, required fields, enum values, and nesting, validate against
 the linked schema rather than reimplementing this prose.
