@@ -7,7 +7,7 @@ For a selected partitioned task, omitted `partition_keys` and `partition_range` 
 - **WHEN** a custom partition definition accepts a non-duplicate sequence containing `0` or `""`
 - **THEN** the result contains a partition attempt for each normalized key and none is recorded as unpartitioned
 
-#### Scenario: Partition selection is omitted for a selected partitioned task
+#### Scenario: Partition keys are omitted for a selected partitioned task
 - **WHEN** a selected flow includes a partitioned task and both explicit keys and range are omitted
 - **THEN** the call raises `ValueError` before any asset function runs
 
@@ -15,7 +15,7 @@ For a selected partitioned task, omitted `partition_keys` and `partition_range` 
 - **WHEN** a selected flow includes a partitioned task and `partition_keys` is an empty sequence
 - **THEN** the partitioned task is aggregate `skipped` with reason `no_partition_keys`, distinct from dependency blocking, and its non-partitioned downstream receives an empty mapping and executes
 
-#### Scenario: Invalid normalized partition keys are supplied
+#### Scenario: Invalid partition keys are supplied
 - **WHEN** normalization rejects a key, returns `None` or an unhashable value, or produces two keys equal under Python equality
 - **THEN** the call raises `ValueError` before any asset function runs
 
@@ -39,4 +39,3 @@ For a non-partitioned downstream task that depends on a partitioned upstream tas
 #### Scenario: An empty partition selection permits a non-partitioned reducer
 - **WHEN** a partitioned upstream has aggregate `skipped(no_partition_keys)` and its non-partitioned downstream is otherwise runnable
 - **THEN** the downstream executes with `{}` as that upstream argument
-

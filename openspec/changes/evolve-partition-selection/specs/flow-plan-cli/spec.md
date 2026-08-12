@@ -20,7 +20,7 @@ mutually exclusive. The existing repeatable `--partition-key` and `--partition` 
 SHALL remain available. Supplying a selector to an unpartitioned closure SHALL fail as
 a usage error rather than silently ignoring it.
 
-#### Scenario: Build a key-selected plan
+#### Scenario: Build a plan
 - **WHEN** a caller selects valid repeatable keys and configuration
 - **THEN** `plan` shows its dependency-first normalized plan without asset execution
 
