@@ -35,8 +35,8 @@ theme:
     - navigation.footer
     - navigation.indexes
     - navigation.instant
+    - navigation.path
     - navigation.sections
-    - navigation.tabs
     - navigation.top
     - search.highlight
     - search.share
