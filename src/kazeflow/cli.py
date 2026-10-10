@@ -12,6 +12,7 @@ import asyncio
 from contextlib import redirect_stdout
 import importlib
 import importlib.util
+from importlib import resources
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,6 +73,11 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    commands.add_parser(
+        "instructions",
+        help="print bundled development instructions without loading an entry",
+    )
 
     assets = commands.add_parser("assets", help="list assets loaded from an entry")
     assets.add_argument("entry", help="a Python file or module:attribute entry")
@@ -148,6 +154,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     try:
         args = parser.parse_args(argv)
+        if args.command == "instructions":
+            try:
+                guide = (
+                    resources.files("kazeflow")
+                    .joinpath("development_instructions.md")
+                    .read_text(encoding="utf-8")
+                )
+            except OSError as error:
+                raise _InfrastructureError(
+                    f"bundled instructions unavailable: {error}"
+                ) from error
+            sys.stdout.write(guide)
+            return EXIT_SUCCESS
         if args.command == "runs":
             return _run_history(args)
         _validate_output_selection(args)

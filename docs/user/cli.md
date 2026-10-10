@@ -5,6 +5,7 @@ flow scripts. Use task pages for the exact command you need.
 
 | Command | Purpose |
 | --- | --- |
+| [`instructions`](cli/instructions.md) | Read the development guide bundled with the installed version. |
 | [`assets`](cli/assets.md) | List assets discovered while loading an entry. |
 | [`partitions`](cli/partitions.md) | Inspect partition definitions and supported selection forms without asset execution. |
 | [`plan`](cli/plan.md) | Review targets, order, partitions, configuration, and graph. |

@@ -102,6 +102,7 @@ nav:
       - Trust boundary: concepts/trust-boundary.md
   - CLI reference:
       - cli.md
+      - instructions: cli/instructions.md
       - assets: cli/assets.md
       - partitions: cli/partitions.md
       - plan: cli/plan.md

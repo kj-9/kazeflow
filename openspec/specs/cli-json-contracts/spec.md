@@ -1,7 +1,9 @@
 # cli-json-contracts Specification
 
 ## Purpose
-TBD - created by archiving change publish-cli-json-contracts. Update Purpose after archive.
+
+Define versioned, typed JSON documents for every machine-readable CLI outcome so
+automation can identify, validate, and safely consume results without parsing text.
 ## Requirements
 ### Requirement: Typed machine-readable CLI envelope
 Every completed `--format json` CLI outcome SHALL write one JSON object with exactly
@@ -126,4 +128,3 @@ successful JSON document to stdout and SHALL write their diagnostics to stderr.
 - **WHEN** a selected persistence or presentation adapter fails
 - **THEN** the command exits `4`, writes diagnostics to stderr, and emits no
   successful JSON document to stdout
-

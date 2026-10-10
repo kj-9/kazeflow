@@ -14,6 +14,7 @@ import venv
 
 CORE_PROGRAM = """
 import json
+from importlib import resources
 from pathlib import Path
 import subprocess
 import sys
@@ -60,6 +61,18 @@ def publish(source):
     encoding="utf-8",
 )
 command = Path(sys.executable).with_name("kazeflow")
+instructions = subprocess.run(
+    [str(command), "instructions"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+assert instructions.stdout == (
+    resources.files("kazeflow")
+    .joinpath("development_instructions.md")
+    .read_text(encoding="utf-8")
+)
+assert instructions.stderr == ""
 assets = subprocess.run(
     [str(command), "assets", str(flow_file), "--format", "json"],
     check=True,

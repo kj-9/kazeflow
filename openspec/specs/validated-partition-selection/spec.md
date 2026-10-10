@@ -1,7 +1,9 @@
 # validated-partition-selection Specification
 
 ## Purpose
-TBD - created by archiving change evolve-partition-selection. Update Purpose after archive.
+
+Define how partition keys are normalized, validated, and selected before execution,
+and how the CLI exposes partition capabilities without invoking asset bodies.
 ## Requirements
 ### Requirement: Partition definitions own canonical key normalization
 Every partition definition SHALL expose a stable domain identifier and SHALL either
@@ -65,4 +67,3 @@ and SHALL NOT enumerate an unbounded or dynamic catalog.
 #### Scenario: Inspect an unpartitioned closure
 - **WHEN** the selected closure contains no partitioned assets
 - **THEN** inspection succeeds with an explicit empty result
-

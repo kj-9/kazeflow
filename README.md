@@ -10,6 +10,9 @@ and review the result—without a daemon, service, or required runtime dependenc
 pip install kazeflow
 ```
 
+Run `kazeflow instructions` to read the development rules bundled with your
+installed version before defining a flow.
+
 For the optional Rich progress display, quote the extra so shells such as zsh do
 not expand the brackets:
 
