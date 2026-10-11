@@ -40,7 +40,7 @@ from .results import (
     TaskReference,
     TaskResult,
 )
-from .resources import Fail, ResourcePolicy, Retry, _RateWindow
+from .resources import Fail, OpenCircuit, ResourcePolicy, Retry, _RateWindow
 
 
 class RunConfig(TypedDict, total=False):
@@ -270,6 +270,7 @@ class _Executor:
             resource.name: resources[resource.name] for resource in plan.resources
         }
         self._cooldowns: dict[str, float] = {}
+        self._circuits: dict[str, AttemptReference] = {}
         self._resource_limits = {
             resource.name: resource.max_concurrency for resource in plan.resources
         }
@@ -345,10 +346,10 @@ class _Executor:
                 selected = self._next_action()
                 if selected is None:
                     break
-                state, attempt, blocked = selected
+                state, attempt, reason = selected
                 self._start_task(state)
-                if blocked:
-                    self._finish_blocked(state, attempt)
+                if reason is not None:
+                    self._finish_blocked(state, attempt, reason)
                     changed = True
                     continue
                 self._start_attempt(state, attempt)
@@ -380,7 +381,9 @@ class _Executor:
                 "valid FlowPlan contains work that cannot become eligible"
             )
 
-    def _next_action(self) -> tuple[_TaskState, _AttemptState, bool] | None:
+    def _next_action(
+        self,
+    ) -> tuple[_TaskState, _AttemptState, SkipReason | None] | None:
         self._rate_deadline = None
         now = time.monotonic()
         for task_plan in self.plan.tasks:
@@ -393,8 +396,10 @@ class _Executor:
                 eligibility = self._eligibility(task, attempt)
                 if eligibility == "ready":
                     if task.plan.materialization_enabled and attempt.prepared is None:
-                        return task, attempt, False
+                        return task, attempt, None
                     resource = task.plan.resource_name
+                    if resource in self._circuits:
+                        return task, attempt, SkipReason.RESOURCE_CIRCUIT_OPEN
                     if (
                         resource is not None
                         and self._resource_running.get(resource, 0)
@@ -415,9 +420,9 @@ class _Executor:
                     if ready_at > now:
                         self._wait_until(ready_at)
                         continue
-                    return task, attempt, False
+                    return task, attempt, None
                 if eligibility == "blocked":
-                    return task, attempt, True
+                    return task, attempt, SkipReason.DEPENDENCY_BLOCKED
         return None
 
     def _wait_until(self, deadline: float) -> None:
@@ -594,7 +599,7 @@ class _Executor:
             body_failed = isinstance(error, _BodyFailure)
             original = error.error if isinstance(error, _BodyFailure) else error
             original_failure = _failure_info(original)
-            action: Fail | Retry = Fail()
+            action: Fail | Retry | OpenCircuit = Fail()
             classification_error: Exception | None = None
             policy = self._policies.get(resource) if resource is not None else None
             if (
@@ -608,14 +613,20 @@ class _Executor:
                         action = Retry(
                             selected.after_seconds, selected.cooldown_resource
                         )
+                    elif isinstance(selected, OpenCircuit):
+                        action = OpenCircuit()
                     elif isinstance(selected, Fail):
                         action = Fail()
                     else:
                         if inspect.iscoroutine(selected):
                             selected.close()
-                        raise TypeError("failure classifier must return Fail or Retry")
+                        raise TypeError(
+                            "failure classifier must return Fail, Retry or OpenCircuit"
+                        )
                 except Exception as callback_error:
                     classification_error = callback_error
+            if isinstance(action, OpenCircuit) and resource is not None:
+                self._circuits.setdefault(resource, attempt.reference)
             now = time.monotonic()
             cooldown = None
             if (
@@ -729,13 +740,25 @@ class _Executor:
             cooldown_seconds=cooldown,
         )
 
-    def _finish_blocked(self, task: _TaskState, attempt: _AttemptState) -> None:
-        blockers = self._blockers(task, attempt)
+    def _finish_blocked(
+        self, task: _TaskState, attempt: _AttemptState, reason: SkipReason
+    ) -> None:
+        if reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+            assert task.plan.resource_name is not None
+            blockers = (self._circuits[task.plan.resource_name],)
+        else:
+            blockers = self._blockers(task, attempt)
         now = _utc_now()
-        started = task.started_at or now
+        started = attempt.started_at or task.started_at or now
         duration = timedelta(
             seconds=max(
-                0.0, time.monotonic() - (task.started_monotonic or time.monotonic())
+                0.0,
+                time.monotonic()
+                - (
+                    attempt.started_monotonic
+                    or task.started_monotonic
+                    or time.monotonic()
+                ),
             )
         )
         attempt.result = AttemptResult(
@@ -744,14 +767,15 @@ class _Executor:
             started,
             now,
             duration,
-            reason=SkipReason.DEPENDENCY_BLOCKED,
+            reason=reason,
             blocked_by=blockers,
+            invocations=attempt.invocations,
         )
         self._emit(
             EventKind.ATTEMPT_FINISHED,
             attempt=attempt.reference,
             status=AttemptStatus.SKIPPED,
-            reason=SkipReason.DEPENDENCY_BLOCKED,
+            reason=reason,
             blocked_by=blockers,
         )
 
@@ -796,7 +820,12 @@ class _Executor:
                 if all(
                     attempt.status is AttemptStatus.SKIPPED for attempt in completed
                 ):
-                    reason = SkipReason.DEPENDENCY_BLOCKED
+                    reasons = {attempt.reason for attempt in completed}
+                    reason = (
+                        next(iter(reasons))
+                        if len(reasons) == 1
+                        else SkipReason.MIXED_BLOCKED
+                    )
                     blockers = tuple(
                         blocker
                         for attempt in completed
@@ -824,7 +853,14 @@ class _Executor:
         # unattributed.  The event model requires every skipped finish to carry a
         # reason, so its lifecycle observation identifies the blocked attempts.
         if result.status is AttemptStatus.SKIPPED and event_reason is None:
-            event_reason = SkipReason.DEPENDENCY_BLOCKED
+            reasons = {
+                attempt.reason
+                for attempt in result.attempts
+                if attempt.status is AttemptStatus.SKIPPED
+            }
+            event_reason = (
+                next(iter(reasons)) if len(reasons) == 1 else SkipReason.MIXED_BLOCKED
+            )
             event_blockers = tuple(
                 blocker
                 for completed_attempt in result.attempts

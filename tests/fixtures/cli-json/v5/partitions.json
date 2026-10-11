@@ -1,0 +1,1 @@
+{"data":{"partitions":[{"asset":"publish","definition_kind":"DatePartitionDef","domain":"date","key_format":"YYYY-MM-DD","supports_range":true}],"targets":["publish"]},"document_type":"kazeflow.partitions","schema_version":1}

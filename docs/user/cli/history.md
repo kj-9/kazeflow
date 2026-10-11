@@ -36,9 +36,9 @@ the same values; stored records are not automatically redacted. See the
 For the typed JSON envelopes, distinct CLI/record/store versions, schemas, and
 ordering guarantees, use the [JSON automation contract](json.md).
 
-History JSON uses schema version 2. Each listed or shown run reports its own
+History JSON uses schema version 3. Each listed or shown run reports its own
 portable record version, so a store schema v1 database can return a mixture of
-legacy record v1 and current record v2 rows without rewriting older runs.
+record v1, v2, and v3 rows without rewriting older runs.
 
 ```console
 $ kazeflow runs list

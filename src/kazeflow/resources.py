@@ -35,7 +35,12 @@ class Retry:
         object.__setattr__(self, "after_seconds", seconds)
 
 
-FailureAction: TypeAlias = Fail | Retry
+@dataclass(frozen=True)
+class OpenCircuit:
+    """Fail this attempt and stop pending body invocations on its resource."""
+
+
+FailureAction: TypeAlias = Fail | Retry | OpenCircuit
 
 
 @dataclass(frozen=True)

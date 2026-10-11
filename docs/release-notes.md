@@ -22,8 +22,22 @@
   coordinate separate runs.
 - The initial resource policy projection added plan schema v3 with selected
   concurrency/rate limits and task-resource associations. The retry extension
-  below advances the current main contracts to plan v4 and run/history v2.
+  below advances the current main contracts to plan v4 and run/history v2; the
+  circuit-breaker extension advances run/history to v3.
 - Plan v1 through v3 schemas and goldens remain available for historical use.
+
+## Unreleased: Resource circuit breaker
+
+- Resource failure classifiers can return `OpenCircuit()` to stop pending body work
+  on that resource for the rest of the current run. The first source attempt is
+  recorded; admitted operations finish normally, dependency-blocked outcomes retain
+  precedence, and compatible materialization hits can complete without a body call.
+- New circuit skips retain a `blocked_by` source reference. Portable result and event
+  schema v3 accept `resource_circuit_open` and aggregate `mixed_blocked` reasons;
+  older record/event versions reject those values.
+- CLI run and history envelopes advance to v3. The schema collection advances to v5,
+  while plan remains v4 and database layout remains v1. Stores can read and retain
+  mixed record v1/v2/v3 rows without rewriting existing records.
 
 ## Unreleased: Resource retry and cooldown
 
@@ -35,7 +49,7 @@
   failures are not automatically retried. Application side effects may repeat.
 - Plan JSON advances to v4 with retry budget and classifier-enabled metadata. Run
   result and history documents advance to v2 and include invocation records. SQLite
-  layout remains schema v1 and can store both legacy record v1 and current record v2.
+  layout remains schema v1 and can store record v1, v2, and v3 rows.
 - Plan v1-v3 examples remain available for historical consumers; run/history v1
   records remain readable. Consumers should explicitly accept the new per-type
   schema versions.

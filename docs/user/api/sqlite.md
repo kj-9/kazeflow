@@ -15,8 +15,8 @@ Constructing a store creates or initializes schema version 1. It stores portable
 records, not reconstructed in-memory `RunResult` objects.
 
 The database layout version is independent of the portable record version. Schema
-version 1 can contain older record v1 rows and newly saved record v2 rows; saving
-does not rewrite existing rows. `StoredRunRecord.schema_version` identifies the
+version 1 can contain record v1, v2, and v3 rows; new saves use record v3 and do
+not rewrite older rows. `StoredRunRecord.schema_version` identifies the
 record version for that row.
 
 ## `SQLiteRunStore`

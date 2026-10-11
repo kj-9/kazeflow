@@ -31,10 +31,10 @@ def _json_data(stdout: str, document_type: str) -> dict[str, Any]:
     document = json.loads(stdout)
     versions = {
         "kazeflow.plan": 4,
-        "kazeflow.run-result": 2,
-        "kazeflow.runs-list": 2,
-        "kazeflow.runs-show": 2,
-        "kazeflow.runs-compare": 2,
+        "kazeflow.run-result": 3,
+        "kazeflow.runs-list": 3,
+        "kazeflow.runs-show": 3,
+        "kazeflow.runs-compare": 3,
     }
     assert document == {
         "document_type": document_type,
@@ -684,7 +684,7 @@ def publish():
 
     assert status == 0
     run = _json_data(stdout, "kazeflow.run-result")
-    assert run["record_schema_version"] == 2
+    assert run["record_schema_version"] == 3
     record = run["record"]
     assert record["status"] == "success"
     assert "raw output must not be serialized" not in stdout
@@ -1019,7 +1019,7 @@ def publish():
     assert stderr == ""
     history = _json_data(stdout, "kazeflow.runs-list")
     assert history["runs"][0]["run_id"] == run_id
-    assert history["runs"][0]["record_schema_version"] == 2
+    assert history["runs"][0]["record_schema_version"] == 3
     assert history["runs"][0]["status"] == "success"
     assert history["runs"][0]["saved_at"].endswith("+00:00")
 
@@ -1071,7 +1071,7 @@ def publish():
     assert stderr == ""
     shown = _json_data(stdout, "kazeflow.runs-show")
     assert shown["run_id"] == success_id
-    assert shown["record_schema_version"] == 2
+    assert shown["record_schema_version"] == 3
     assert shown["store_schema_version"] == 1
     assert shown["record"]["tasks"][0]["attempts"][0]["attempt"]["partition"] == {
         "present": False

@@ -9,7 +9,14 @@ from .materialization import (
 from .partition import DatePartitionDef, PartitionDef
 from .plan import FlowPlan
 from .results import InvocationResult, RunResult
-from .resources import Fail, FailureAction, RateLimit, ResourcePolicy, Retry
+from .resources import (
+    Fail,
+    FailureAction,
+    OpenCircuit,
+    RateLimit,
+    ResourcePolicy,
+    Retry,
+)
 
 __all__ = [
     "asset",
@@ -26,6 +33,7 @@ __all__ = [
     "Materialization",
     "MaterializationContext",
     "MaterializationRecord",
+    "OpenCircuit",
     "PartitionDef",
     "RateLimit",
     "RunConfig",

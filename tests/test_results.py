@@ -84,6 +84,8 @@ def test_exact_enums_fields_and_defaults() -> None:
     assert {reason.name: reason.value for reason in SkipReason} == {
         "DEPENDENCY_BLOCKED": "dependency_blocked",
         "NO_PARTITION_KEYS": "no_partition_keys",
+        "RESOURCE_CIRCUIT_OPEN": "resource_circuit_open",
+        "MIXED_BLOCKED": "mixed_blocked",
     }
     assert [field.name for field in fields(AttemptReference)] == [
         "task",
@@ -184,10 +186,11 @@ def test_invocation_history_is_validated_and_projected_only_in_version_two() -> 
         failed.to_record(),
         succeeded.to_record(),
     ]
+    assert result.to_record(schema_version=3) == result.to_record(schema_version=2)
     assert "output" not in json.dumps(result.to_record(schema_version=2))
 
 
-@pytest.mark.parametrize("schema_version", [0, 3, True, "2"])
+@pytest.mark.parametrize("schema_version", [0, 4, True, "2"])
 def test_result_projection_rejects_unknown_or_boolean_versions(schema_version) -> None:
     with pytest.raises(ValueError, match="schema_version"):
         successful_attempt().to_record(schema_version=schema_version)
@@ -560,6 +563,81 @@ def test_no_work_partitioned_task_and_dependency_blocked_aggregate() -> None:
             started_at=NOW,
             ended_at=LATER,
             duration=DURATION,
+        )
+
+
+def test_circuit_and_mixed_blocked_partition_aggregates_are_attributed() -> None:
+    task = TaskReference("partitioned")
+    source = AttemptReference(TaskReference("source"))
+    dependency = AttemptReference(TaskReference("dependency"))
+    circuit_attempt = AttemptResult(
+        AttemptReference(task, True, ""),
+        AttemptStatus.SKIPPED,
+        NOW,
+        LATER,
+        DURATION,
+        reason=SkipReason.RESOURCE_CIRCUIT_OPEN,
+        blocked_by=(source,),
+    )
+    dependency_attempt = AttemptResult(
+        AttemptReference(task, True, 0),
+        AttemptStatus.SKIPPED,
+        NOW,
+        LATER,
+        DURATION,
+        reason=SkipReason.DEPENDENCY_BLOCKED,
+        blocked_by=(dependency,),
+    )
+    circuit_only = TaskResult(
+        task,
+        True,
+        AttemptStatus.SKIPPED,
+        NOW,
+        LATER,
+        DURATION,
+        (circuit_attempt,),
+        SkipReason.RESOURCE_CIRCUIT_OPEN,
+        (source,),
+    )
+    mixed = TaskResult(
+        task,
+        True,
+        AttemptStatus.SKIPPED,
+        NOW,
+        LATER,
+        DURATION,
+        (circuit_attempt, dependency_attempt),
+        SkipReason.MIXED_BLOCKED,
+        (source, dependency),
+    )
+    assert circuit_only.reason is SkipReason.RESOURCE_CIRCUIT_OPEN
+    assert mixed.blocked_by == (source, dependency)
+    assert mixed.to_record(schema_version=3)["reason"] == "mixed_blocked"
+    with pytest.raises(ValueError, match="schema version 2"):
+        mixed.to_record(schema_version=2)
+
+    mixed_outcome = TaskResult(
+        task,
+        True,
+        AttemptStatus.SKIPPED,
+        NOW,
+        LATER,
+        DURATION,
+        (successful_attempt("partitioned", 2), circuit_attempt),
+    )
+    assert mixed_outcome.reason is None
+    for version in (1, 2):
+        with pytest.raises(ValueError, match="schema version"):
+            mixed_outcome.to_record(schema_version=version)
+    with pytest.raises(ValueError, match="one blocker"):
+        AttemptResult(
+            AttemptReference(task, True, 1),
+            AttemptStatus.SKIPPED,
+            NOW,
+            LATER,
+            DURATION,
+            reason=SkipReason.RESOURCE_CIRCUIT_OPEN,
+            blocked_by=(source, dependency),
         )
 
 

@@ -24,6 +24,8 @@
 
 ::: kazeflow.Retry
 
+::: kazeflow.OpenCircuit
+
 ## `RunConfig`
 
 ::: kazeflow.RunConfig

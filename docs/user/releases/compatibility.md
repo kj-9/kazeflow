@@ -30,11 +30,11 @@ enum meanings, and documented array order are append-closed. An incompatible cha
 uses a new schema version for that document type and has a migration note in release
 documentation.
 
-Plan schema v4 and run/history schema v2 are unreleased changes on `main`. Plan v4
+Plan schema v4 and run/history schema v3 are unreleased changes on `main`. Plan v4
 includes selected resource concurrency, rate limit, retry budget, and
-classifier-enabled metadata. Plan schemas v1 through v3 remain available for
-historical consumers. Run-result and history v2 add numbered invocation records,
-while stored rows retain their individual record version in the unchanged SQLite
+classifier-enabled metadata. Plan schemas v1 through v3 and CLI collection v4 remain
+available for historical consumers. Run-result and history v3 add circuit skip
+reasons; stored rows retain their individual record version in the unchanged SQLite
 layout v1. Check the installed package's emitted versions before choosing a schema.
 See the [JSON migration notes](../cli/json.md#data-fields).
 

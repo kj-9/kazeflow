@@ -90,7 +90,7 @@ assert not any(name == "rich" or name.startswith("rich.") for name in sys.module
 flow_file = Path("smoke_flow.py")
 flow_file.write_text(
     '''
-from kazeflow import Fail, Flow, RateLimit, ResourcePolicy, Retry, asset
+from kazeflow import Fail, Flow, OpenCircuit, RateLimit, ResourcePolicy, Retry, asset
 
 invocations = []
 
@@ -168,8 +168,8 @@ run_cli = subprocess.run(
 )
 run_document = json.loads(run_cli.stdout)
 assert run_document["document_type"] == "kazeflow.run-result"
-assert run_document["schema_version"] == 2
-assert run_document["data"]["record_schema_version"] == 2
+assert run_document["schema_version"] == 3
+assert run_document["data"]["record_schema_version"] == 3
 assert run_document["data"]["record"]["status"] == "success"
 source_record = next(task for task in run_document["data"]["record"]["tasks"] if task["task"]["task_name"] == "source")
 assert [item["number"] for item in source_record["attempts"][0]["invocations"]] == [1, 2]
@@ -194,9 +194,52 @@ history = subprocess.run(
 history_document = json.loads(history.stdout)
 assert history_document["document_type"] == "kazeflow.runs-show"
 assert history_document["data"]["run_id"] == stored_run_id
-assert history_document["schema_version"] == 2
-assert history_document["data"]["record_schema_version"] == 2
+assert history_document["schema_version"] == 3
+assert history_document["data"]["record_schema_version"] == 3
 assert history_document["data"]["store_schema_version"] >= 1
+
+circuit_file = Path("circuit_flow.py")
+circuit_file.write_text(
+    '''
+from kazeflow import Flow, OpenCircuit, ResourcePolicy, asset
+from pathlib import Path
+
+def classify(error):
+    return OpenCircuit()
+
+@asset(resource="network")
+def a_source():
+    raise PermissionError("resource unavailable")
+
+@asset(resource="network")
+def z_pending():
+    Path("pending-called").write_text("called")
+
+flow = Flow(["a_source", "z_pending"], resources={"network": ResourcePolicy(max_concurrency=1, classify_failure=classify)})
+''',
+    encoding="utf-8",
+)
+circuit_run = subprocess.run(
+    [str(command), "run", str(circuit_file), "--yes", "--format", "json"],
+    check=False,
+    capture_output=True,
+    text=True,
+)
+assert circuit_run.returncode == 1
+circuit_document = json.loads(circuit_run.stdout)
+assert circuit_document["schema_version"] == 3
+assert circuit_document["data"]["record_schema_version"] == 3
+circuit_tasks = {
+    task["task"]["task_name"]: task
+    for task in circuit_document["data"]["record"]["tasks"]
+}
+assert circuit_tasks["a_source"]["status"] == "failed"
+assert circuit_tasks["z_pending"]["status"] == "skipped"
+assert circuit_tasks["z_pending"]["reason"] == "resource_circuit_open"
+assert circuit_tasks["z_pending"]["blocked_by"] == [
+    {"task": {"task_name": "a_source"}, "partition": {"present": False}}
+]
+assert not Path("pending-called").exists()
 """
 
 TUI_PROGRAM = """

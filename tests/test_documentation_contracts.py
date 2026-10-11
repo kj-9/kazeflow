@@ -63,6 +63,8 @@ def test_json_automation_reference_has_complete_public_contract_links() -> None:
     assert (docs_root / "schemas" / "cli" / "v3" / "plan.schema.json").is_file()
     assert (docs_root / "schemas" / "cli" / "v4" / "schema.json").is_file()
     assert (docs_root / "schemas" / "cli" / "v4" / "plan.schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v5" / "schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v5" / "plan.schema.json").is_file()
 
 
 def test_partition_selection_contract_matches_documentation(

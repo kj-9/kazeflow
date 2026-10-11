@@ -22,6 +22,9 @@ Retry-enabled resource operations emit `invocation_started` and
 The ordinary attempt lifecycle still ends once per task or partition, and TUI
 progress continues to count logical attempts.
 
-`ExecutionEvent.to_record()` defaults to schema version 2, which includes nullable
-invocation fields. Pass `schema_version=1` to project legacy event kinds; new
-invocation event kinds cannot be represented in that older shape.
+`ExecutionEvent.to_record()` defaults to schema version 3. Event v3 accepts the
+resource circuit skip reason and its source reference. Pass `schema_version=1` for
+legacy event kinds or `2` for the earlier numbered-invocation shape; both older
+versions reject circuit and mixed-blocked reasons. The source attempt finishes as
+failed before pending peers are skipped, so the event stream keeps the causal
+ordering without a separate circuit event.

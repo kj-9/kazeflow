@@ -53,7 +53,7 @@ no attempt; task start SHALL have `AttemptStatus.RUNNING` and task finish a term
 and no task; attempt start SHALL have `AttemptStatus.RUNNING` and attempt finish a
 terminal `AttemptStatus`.
 
-`reason` and `blocked_by` SHALL follow the skipped-value rules of the result model.
+`reason` and `blocked_by` SHALL follow the skipped-value rules of the result model. Circuit-skipped attempt finishes SHALL carry exactly one source attempt. Task finishes with mixed skip causes SHALL use `mixed_blocked` and retain ordered blockers; this reason is invalid for attempt finishes.
 `invocation_started` and `invocation_finished` SHALL carry an attempt and a positive one-based invocation number, no task or skip fields. Start SHALL be running; finish SHALL be success or failed. Only failed invocation finishes MAY carry finite non-negative retry-delay/cooldown seconds. Other events SHALL carry no invocation fields.
 
 `failure` SHALL be present exactly for failed `attempt_finished` or failed `invocation_finished` and SHALL be absent for every other event.  Construction SHALL reject incompatible kind,
@@ -71,7 +71,7 @@ identity, status, reason, blocker, or failure combinations.
 
 ### Requirement: Event payloads and records exclude result objects and raw payloads
 `ExecutionEvent` SHALL NOT accept or carry a `RunResult`, `TaskResult`,
-`AttemptResult`, raw asset output, or raw exception object.  Its explicit version 1 projection SHALL preserve the historical keys for legacy lifecycle kinds and reject invocation kinds. Its default version 2 `to_record()` SHALL return exactly these keys:
+`AttemptResult`, raw asset output, or raw exception object.  Its explicit version 1 projection SHALL preserve the historical keys for legacy lifecycle kinds and reject invocation kinds. Its default version 3 `to_record()` SHALL return exactly these keys:
 
 ```text
 {"run_id", "sequence", "occurred_at", "kind", "task", "attempt", "status",
@@ -79,7 +79,7 @@ identity, status, reason, blocker, or failure combinations.
  "retry_delay_seconds", "cooldown_seconds"}
 ```
 
-Version 2 SHALL contain `schema_version: 2`; unsupported and boolean versions SHALL be rejected.
+Version 3 SHALL contain `schema_version: 3` and support circuit/mixed-blocked reasons. Explicit version 2 SHALL retain the previous shape and reject new reasons; version 1 SHALL likewise reject new reasons. Unsupported and boolean versions SHALL be rejected.
 
 The `task`, `attempt`, and `failure` values SHALL be their result-model record
 projections or `null`; enum values SHALL be strings; blockers SHALL be an ordered
@@ -97,8 +97,7 @@ non-empty, has one run id, begins at sequence 1, increments by one for every eve
 starts with `flow_started`, and ends with `flow_finished`.  Each task and attempt
 SHALL have exactly one finish event and at most one start event; every start SHALL
 precede its matching finish; and every task-finished event SHALL follow all
-attempt-finished events for that task.  Dependency-blocked tasks or attempts and
-no-work tasks SHALL have finish events with zero starts.  The contract imposes no
+attempt-finished events for that task.  Dependency-blocked and circuit-skipped pending attempts and no-work tasks SHALL allow finish events with zero starts. Circuit-skipped retrying attempts SHALL retain their existing start and numbered history. Circuit skip source references SHALL identify an earlier failed attempt finish in this stream.  The contract imposes no
 additional ordering between independent concurrent branches.
 
 #### Scenario: Independent attempts may finish in observed order

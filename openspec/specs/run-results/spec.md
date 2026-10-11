@@ -17,7 +17,9 @@ FlowStatus: PENDING="pending", RUNNING="running", SUCCESS="success",
 AttemptStatus: PENDING="pending", RUNNING="running", SUCCESS="success",
                FAILED="failed", SKIPPED="skipped", CANCELLED="cancelled"
 SkipReason: DEPENDENCY_BLOCKED="dependency_blocked",
-            NO_PARTITION_KEYS="no_partition_keys"
+            NO_PARTITION_KEYS="no_partition_keys",
+            RESOURCE_CIRCUIT_OPEN="resource_circuit_open",
+            MIXED_BLOCKED="mixed_blocked"
 TaskReference(task_name: str)
 AttemptReference(task: TaskReference, partition_key_present: bool = False,
                  partition_key: object | None = None)
@@ -29,7 +31,8 @@ AttemptResult(attempt: AttemptReference, status: AttemptStatus,
               reason: SkipReason | None = None,
               blocked_by: tuple[AttemptReference, ...] = (),
               resolution: str | None = None,
-              materialization_id: str | None = None)
+              materialization_id: str | None = None,
+              invocations: tuple[InvocationResult, ...] = ())
 TaskResult(task: TaskReference, is_partitioned: bool, status: AttemptStatus,
            started_at: datetime, ended_at: datetime, duration: timedelta,
            attempts: tuple[AttemptResult, ...] = (),
@@ -76,8 +79,7 @@ not calculated from wall-clock timestamps.
 
 An attempt with `failed` status SHALL have `FailureInfo`; it MAY retain a raw
 exception in `exception`.  A non-failed attempt SHALL have neither `failure` nor
-`exception`.  A skipped attempt SHALL have a reason; only
-`dependency_blocked` is valid for an attempt and it SHALL have non-empty
+`exception`.  A skipped attempt SHALL have a reason; `dependency_blocked` and `resource_circuit_open` are valid for attempts and SHALL have non-empty
 `blocked_by`.  A non-skipped attempt SHALL have `reason=None` and empty
 `blocked_by`.
 
@@ -100,8 +102,7 @@ zero-attempt task result is valid.
 
 For non-empty partitioned tasks, aggregate status SHALL be `failed` if any attempt
 failed; otherwise `cancelled` if any attempt was cancelled; otherwise `skipped` if
-any attempt was skipped; otherwise `success`.  A `dependency_blocked` aggregate is
-valid only when every attempt is a dependency-blocked skip, and its `blocked_by`
+any attempt was skipped; otherwise `success`.  A uniform blocked aggregate SHALL use its shared `dependency_blocked` or `resource_circuit_open` reason only when every attempt is skipped with that reason; an all-skipped aggregate with both reasons SHALL use `mixed_blocked`. Its `blocked_by`
 SHALL concatenate attempt blockers in attempt order.  A mixed success/skipped
 aggregate SHALL use `reason=None` and `blocked_by=()`.
 
@@ -170,7 +171,7 @@ A logical attempt SHALL optionally retain an immutable ordered invocation histor
 - **THEN** its final status is success and its ordered history contains failed invocation 1 followed by successful invocation 2
 
 ### Requirement: Result projections support explicit portable record versions
-Existing zero-argument result projections SHALL preserve portable record version 1. Explicit version 2 projections SHALL add an ordered `invocations` array to each attempt, with number, status, start/end/duration, nullable failure, retry-delay and cooldown seconds. Other record fields SHALL remain identical. Unknown or boolean versions SHALL be rejected. Both projections SHALL omit raw outputs, raw exceptions, raw partition keys, classifier code and materialization provenance.
+Existing zero-argument result projections SHALL preserve portable record version 1. Explicit version 2 projections SHALL add an ordered `invocations` array to each attempt, with number, status, start/end/duration, nullable failure, retry-delay and cooldown seconds. Other record fields SHALL remain identical. Explicit version 3 SHALL preserve version 2 fields and support circuit and mixed-blocked reasons. Versions 1 and 2 SHALL reject results containing these new reasons instead of mislabeling them. Unknown or boolean versions SHALL be rejected. Both projections SHALL omit raw outputs, raw exceptions, raw partition keys, classifier code and materialization provenance.
 
 #### Scenario: Export retry history safely
 - **WHEN** a recovered result is projected explicitly as portable record version 2

@@ -49,8 +49,11 @@ records numbered body/commit invocations under the single logical task or partit
 attempt. Only asset body exceptions reach the classifier. Each retry reacquires
 resource concurrency/rate permits. Requested delay and shared cooldown waits release
 the execution slot so independent branches can progress. CLI run results use
-record schema v2; Python `RunResult.to_record()` keeps its v1 default unless v2 is
-requested explicitly.
+record schema v3; Python `RunResult.to_record()` keeps its v1 default unless v2 or
+v3 is requested explicitly. A classifier may return `OpenCircuit()` to fail its
+source attempt and skip pending same-resource body work for the rest of that run.
+Already admitted work finishes normally; compatible materialization hits can still
+complete without invoking a body.
 
 ## Optional adapters
 

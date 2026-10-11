@@ -17,8 +17,8 @@ from kazeflow.cli import main
 
 
 _ROOT = Path(__file__).parents[1]
-_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v4/schema.json"
-_GOLDENS = _ROOT / "tests/fixtures/cli-json/v4"
+_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v5/schema.json"
+_GOLDENS = _ROOT / "tests/fixtures/cli-json/v5"
 _HISTORICAL_V1_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v1/schema.json"
 _HISTORICAL_V1_GOLDENS = _ROOT / "tests/fixtures/cli-json/v1"
 _CURRENT_SCHEMA_PATH = _SCHEMA_PATH
@@ -59,12 +59,12 @@ def _golden_v3(name: str) -> dict[str, Any]:
 
 
 def _current_validator() -> Any:
-    schema = json.loads(_PLAN_V4_SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
 def _current_golden(name: str) -> dict[str, Any]:
-    return json.loads((_PLAN_V4_GOLDENS / name).read_text(encoding="utf-8"))
+    return json.loads((_GOLDENS / name).read_text(encoding="utf-8"))
 
 
 def _script(tmp_path: Path, name: str, source: str) -> Path:
@@ -117,7 +117,7 @@ def test_checked_in_goldens_validate_against_the_normative_schema() -> None:
     validator = _validator()
     golden_paths = sorted(_GOLDENS.glob("*.json"))
 
-    assert len(golden_paths) == 14
+    assert len(golden_paths) == 15
     for path in golden_paths:
         validator.validate(json.loads(path.read_text(encoding="utf-8")))
 
@@ -139,6 +139,13 @@ def test_checked_in_goldens_validate_against_the_normative_schema() -> None:
     assert len(plan_goldens) == 5
     for path in plan_goldens:
         plan_validator.validate(json.loads(path.read_text(encoding="utf-8")))
+
+    historical_v4 = Draft202012Validator(
+        json.loads((_ROOT / "docs/user/schemas/cli/v4/schema.json").read_text()),
+        format_checker=FormatChecker(),
+    )
+    for path in (_ROOT / "tests/fixtures/cli-json/v4").glob("*.json"):
+        historical_v4.validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 def test_resource_plan_json_v4_matches_golden(
@@ -256,8 +263,8 @@ flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=1,
     assert status == 0
     assert "Planned run:" in stderr
     _current_validator().validate(result)
-    assert result["schema_version"] == 2
-    assert result["data"]["record_schema_version"] == 2
+    assert result["schema_version"] == 3
+    assert result["data"]["record_schema_version"] == 3
     attempt = result["data"]["record"]["tasks"][0]["attempts"][0]
     assert [item["number"] for item in attempt["invocations"]] == [1, 2]
     assert attempt["invocations"][0]["status"] == "failed"
@@ -271,8 +278,8 @@ flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=1,
     assert status == 0
     assert stderr == ""
     _current_validator().validate(shown)
-    assert shown["schema_version"] == 2
-    assert shown["data"]["record_schema_version"] == 2
+    assert shown["schema_version"] == 3
+    assert shown["data"]["record_schema_version"] == 3
     assert [
         item["number"]
         for item in shown["data"]["record"]["tasks"][0]["attempts"][0]["invocations"]
@@ -347,6 +354,78 @@ def test_history_schema_binds_record_shape_to_version_even_for_empty_selection()
         validator.validate(mislabeled_v2)
 
 
+def test_circuit_reasons_are_record_v3_only_and_history_can_mix_versions() -> None:
+    validator = _current_validator()
+    circuit = copy.deepcopy(_current_golden("runs-show.json"))
+    task = circuit["data"]["record"]["tasks"][0]
+    attempt = task["attempts"][0]
+    source = {"task": {"task_name": "source"}, "partition": {"present": False}}
+    circuit_ref = [source]
+    task.update(
+        status="skipped", reason="resource_circuit_open", blocked_by=circuit_ref
+    )
+    attempt.update(
+        status="skipped", reason="resource_circuit_open", blocked_by=circuit_ref
+    )
+    validator.validate(circuit)
+
+    for old_version in (1, 2):
+        old = copy.deepcopy(circuit)
+        old["data"]["record_schema_version"] = old_version
+        if old_version == 1:
+            old_attempt = old["data"]["record"]["tasks"][0]["attempts"][0]
+            old_attempt.pop("invocations")
+        with pytest.raises(Exception):
+            validator.validate(old)
+
+    invalid_attempt_reason = copy.deepcopy(circuit)
+    invalid_attempt_reason["data"]["record"]["tasks"][0]["attempts"][0]["reason"] = (
+        "mixed_blocked"
+    )
+    with pytest.raises(Exception):
+        validator.validate(invalid_attempt_reason)
+
+    summaries = copy.deepcopy(_current_golden("runs-list.json"))
+    summaries["data"]["runs"].extend(
+        [
+            {
+                "run_id": "LEGACY_V1",
+                "record_schema_version": 1,
+                "status": "success",
+                "saved_at": "2026-08-12T00:00:02+00:00",
+            },
+            {
+                "run_id": "LEGACY_V2",
+                "record_schema_version": 2,
+                "status": "success",
+                "saved_at": "2026-08-12T00:00:02+00:00",
+            },
+        ]
+    )
+    validator.validate(summaries)
+
+    mixed = copy.deepcopy(_current_golden("runs-compare.json"))
+    left = mixed["data"]["left"]
+    left["record_schema_version"] = 2
+    right = mixed["data"]["right"]
+    right["record_schema_version"] = 3
+    right_task = right["record"]["tasks"][0]
+    right_attempt = right_task["attempts"][0]
+    right_task.update(status="skipped", reason="mixed_blocked")
+    right_task["blocked_by"] = [
+        {"task": {"task_name": "dependency"}, "partition": {"present": False}},
+        {"task": {"task_name": "source"}, "partition": {"present": False}},
+    ]
+    right_attempt.update(
+        status="skipped",
+        reason="dependency_blocked",
+        blocked_by=[
+            {"task": {"task_name": "dependency"}, "partition": {"present": False}}
+        ],
+    )
+    validator.validate(mixed)
+
+
 def test_v1_schemas_reject_an_incomplete_completed_document() -> None:
     with pytest.raises(Exception):
         _validator().validate({"document_type": "kazeflow.plan", "data": {}})
@@ -383,6 +462,25 @@ from kazeflow import asset
 @asset
 def publish():
     raise RuntimeError("application failure")
+""",
+    )
+    circuit_entry = _script(
+        tmp_path,
+        "circuit.py",
+        """
+from kazeflow import Flow, OpenCircuit, ResourcePolicy, asset
+
+@asset(resource="network")
+def a_source():
+    raise PermissionError("resource unavailable")
+
+@asset(resource="network")
+def z_pending():
+    return "must not run"
+
+def classify(error): return OpenCircuit()
+
+flow = Flow(["a_source", "z_pending"], resources={"network": ResourcePolicy(max_concurrency=1, classify_failure=classify)})
 """,
     )
 
@@ -474,6 +572,24 @@ def publish():
     assert _normalized(failed, run_ids={failed_id: "RUN_ID"}) == _golden(
         "run-failed.json"
     )
+
+    status, circuit, _ = _run(
+        capsys,
+        ["run", str(circuit_entry), "--yes", "--format", "json"],
+    )
+    assert status == 1
+    validator.validate(circuit)
+    circuit_tasks = circuit["data"]["record"]["tasks"]
+    assert circuit_tasks[1]["reason"] == "resource_circuit_open"
+    assert circuit_tasks[1]["blocked_by"] == [
+        {
+            "task": {"task_name": "a_source"},
+            "partition": {"present": False},
+        }
+    ]
+    assert _normalized(
+        circuit, run_ids={circuit["data"]["record"]["run_id"]: "RUN_ID"}
+    ) == _golden("run-circuit-open.json")
 
     stdin = _TTY("no\n")
     stderr = _TTY()

@@ -69,6 +69,16 @@ def _validate_skipped_payload(
         if not blocked_by:
             raise ValueError("dependency-blocked events require blockers")
         return
+    if reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+        if not blocked_by:
+            raise ValueError("circuit-blocked events require blockers")
+        if kind is EventKind.ATTEMPT_FINISHED and len(blocked_by) != 1:
+            raise ValueError("a circuit-blocked attempt requires exactly one blocker")
+        return
+    if reason is SkipReason.MIXED_BLOCKED:
+        if kind is not EventKind.TASK_FINISHED or not blocked_by:
+            raise ValueError("mixed_blocked is valid only for blocked task finishes")
+        return
     if reason is SkipReason.NO_PARTITION_KEYS:
         if kind is not EventKind.TASK_FINISHED or blocked_by:
             raise ValueError(
@@ -276,14 +286,21 @@ class ExecutionEvent:
                 "retry delays are only valid for failed invocation finishes"
             )
 
-    def to_record(self, *, schema_version: int = 2) -> dict[str, object]:
+    def to_record(self, *, schema_version: int = 3) -> dict[str, object]:
         """Return the fixed, intentionally lossy event record projection."""
         if (
             isinstance(schema_version, bool)
             or not isinstance(schema_version, int)
-            or schema_version not in (1, 2)
+            or schema_version not in (1, 2, 3)
         ):
-            raise ValueError("schema_version must be 1 or 2")
+            raise ValueError("schema_version must be 1, 2, or 3")
+        if schema_version in (1, 2) and self.reason in {
+            SkipReason.RESOURCE_CIRCUIT_OPEN,
+            SkipReason.MIXED_BLOCKED,
+        }:
+            raise ValueError(
+                f"{self.reason.value} cannot be projected as schema version {schema_version}"
+            )
         if schema_version == 1 and self.kind in {
             EventKind.INVOCATION_STARTED,
             EventKind.INVOCATION_FINISHED,
@@ -303,10 +320,10 @@ class ExecutionEvent:
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
             "failure": self.failure.to_record() if self.failure is not None else None,
         }
-        if schema_version == 2:
+        if schema_version in (2, 3):
             record.update(
                 {
-                    "schema_version": 2,
+                    "schema_version": schema_version,
                     "invocation_number": self.invocation_number,
                     "retry_delay_seconds": self.retry_delay_seconds,
                     "cooldown_seconds": self.cooldown_seconds,
@@ -373,6 +390,7 @@ def _finish_without_start_is_allowed(state: _LifecycleState) -> bool:
     return state.finish_status is AttemptStatus.SKIPPED and state.finish_reason in {
         SkipReason.DEPENDENCY_BLOCKED,
         SkipReason.NO_PARTITION_KEYS,
+        SkipReason.RESOURCE_CIRCUIT_OPEN,
     }
 
 
@@ -417,6 +435,24 @@ def validate_event_sequence(events: Sequence[ExecutionEvent]) -> None:
             for attempt, attempt_state in attempt_states:
                 if attempt.task == event.task and not attempt_state.finished:
                     raise ValueError("task finished before one of its attempts")
+            if event.reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+                for blocker in event.blocked_by:
+                    source_state = next(
+                        (
+                            candidate
+                            for known_attempt, candidate in attempt_states
+                            if known_attempt == blocker
+                        ),
+                        None,
+                    )
+                    if (
+                        source_state is None
+                        or not source_state.finished
+                        or source_state.finish_status is not AttemptStatus.FAILED
+                    ):
+                        raise ValueError(
+                            "circuit blocker must reference an earlier failed attempt finish"
+                        )
             state.finished = True
             assert isinstance(event.status, AttemptStatus)
             state.finish_status = event.status
@@ -442,6 +478,24 @@ def validate_event_sequence(events: Sequence[ExecutionEvent]) -> None:
             state = _attempt_state(attempt_states, event.attempt)
             if state.finished:
                 raise ValueError("attempt lifecycle has more than one finish")
+            if event.reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+                blocker = event.blocked_by[0]
+                source_state = next(
+                    (
+                        candidate
+                        for known_attempt, candidate in attempt_states
+                        if known_attempt == blocker
+                    ),
+                    None,
+                )
+                if (
+                    source_state is None
+                    or not source_state.finished
+                    or source_state.finish_status is not AttemptStatus.FAILED
+                ):
+                    raise ValueError(
+                        "circuit blocker must reference an earlier failed attempt finish"
+                    )
             if state.invocation_open is not None:
                 raise ValueError("attempt finished before its invocation finished")
             assert isinstance(event.status, AttemptStatus)

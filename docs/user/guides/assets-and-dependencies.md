@@ -142,3 +142,51 @@ has one terminal result, with its numbered invocation history attached.
 Retries may repeat side effects. Make retried operations idempotent or otherwise
 safe to repeat; kazeflow's exactly-once terminal result does not guarantee exactly
 once external effects.
+
+## Open a resource circuit
+
+A synchronous resource failure classifier can return `OpenCircuit()` when the
+resource should stop receiving new body work for the rest of the current run:
+
+```python
+from kazeflow import Fail, Flow, OpenCircuit, ResourcePolicy, asset
+
+
+def classify_failure(error: Exception) -> Fail | OpenCircuit:
+    if isinstance(error, PermissionError):
+        return OpenCircuit()
+    return Fail()
+
+
+@asset(resource="network")
+def fetch():
+    ...
+
+flow = Flow(
+    ["fetch"],
+    resources={
+        "network": ResourcePolicy(
+            max_concurrency=1,
+            classify_failure=classify_failure,
+        )
+    },
+)
+```
+
+The classifier runs only for an exception from the asset body. The first validated
+`OpenCircuit()` decision in a run identifies the source attempt; pending body work
+using that resource is skipped with `resource_circuit_open` and points to that source.
+The failure is permanent for that run, and another run starts with a closed circuit.
+No threshold, probe, or timer resets the circuit during a run.
+
+Dependency outcomes are checked before circuit state. Work whose dependencies have
+not finished waits; work blocked by a failed dependency keeps the dependency-blocked
+reason. Materialization preparation and loads may proceed while the circuit is open:
+a compatible cache hit completes without calling the resource body, while a miss or
+non-materialized body is skipped. Work already admitted, including body calls and
+materialization operations, finishes normally and is not cancelled. A pending retry
+is skipped immediately after the circuit opens, even if it has a retry delay recorded.
+
+`blocked_by` names the first source attempt in memory. Portable records omit raw
+partition keys and preserve only the task name and whether a partition key was
+present, so two source partitions can be indistinguishable after serialization.

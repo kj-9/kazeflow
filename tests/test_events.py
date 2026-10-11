@@ -183,7 +183,7 @@ def test_event_record_is_fixed_and_lossy() -> None:
     current = value.to_record()
     assert current == {
         **legacy,
-        "schema_version": 2,
+        "schema_version": 3,
         "invocation_number": None,
         "retry_delay_seconds": None,
         "cooldown_seconds": None,
@@ -213,7 +213,8 @@ def test_invocation_event_payloads_and_versioned_records() -> None:
     )
 
     assert started.to_record()["invocation_number"] == 1
-    assert finished.to_record()["schema_version"] == 2
+    assert finished.to_record()["schema_version"] == 3
+    assert finished.to_record(schema_version=2)["schema_version"] == 2
     assert finished.to_record()["retry_delay_seconds"] == 0.25
     with pytest.raises(ValueError, match="cannot be projected"):
         started.to_record(schema_version=1)
@@ -477,3 +478,96 @@ def test_validate_event_sequence_allows_no_work_and_blocked_tasks_without_starts
     )
 
     validate_event_sequence(events)
+
+
+def test_circuit_skip_requires_an_earlier_failed_source_and_allows_retry_history() -> (
+    None
+):
+    source_task = BLOCKER.task
+    events = (
+        event(1, EventKind.FLOW_STARTED, status=FlowStatus.RUNNING),
+        event(
+            2, EventKind.TASK_STARTED, task=source_task, status=AttemptStatus.RUNNING
+        ),
+        event(
+            3, EventKind.ATTEMPT_STARTED, attempt=BLOCKER, status=AttemptStatus.RUNNING
+        ),
+        event(
+            4,
+            EventKind.ATTEMPT_FINISHED,
+            attempt=BLOCKER,
+            status=AttemptStatus.FAILED,
+            failure=FAILURE,
+        ),
+        event(
+            5, EventKind.TASK_FINISHED, task=source_task, status=AttemptStatus.FAILED
+        ),
+        event(6, EventKind.TASK_STARTED, task=TASK, status=AttemptStatus.RUNNING),
+        event(
+            7, EventKind.ATTEMPT_STARTED, attempt=ATTEMPT, status=AttemptStatus.RUNNING
+        ),
+        event(
+            8,
+            EventKind.INVOCATION_STARTED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.RUNNING,
+            invocation_number=1,
+        ),
+        event(
+            9,
+            EventKind.INVOCATION_FINISHED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.FAILED,
+            invocation_number=1,
+            failure=FAILURE,
+            retry_delay_seconds=2.0,
+        ),
+        event(
+            10,
+            EventKind.ATTEMPT_FINISHED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.SKIPPED,
+            reason=SkipReason.RESOURCE_CIRCUIT_OPEN,
+            blocked_by=(BLOCKER,),
+        ),
+        event(
+            11,
+            EventKind.TASK_FINISHED,
+            task=TASK,
+            status=AttemptStatus.SKIPPED,
+            reason=SkipReason.RESOURCE_CIRCUIT_OPEN,
+            blocked_by=(BLOCKER,),
+        ),
+        event(12, EventKind.FLOW_FINISHED, status=FlowStatus.FAILED),
+    )
+    validate_event_sequence(events)
+    assert events[9].to_record()["schema_version"] == 3
+    for version in (1, 2):
+        with pytest.raises(ValueError, match="cannot be projected"):
+            events[9].to_record(schema_version=version)
+
+
+def test_circuit_skip_without_source_finish_is_rejected() -> None:
+    events = (
+        event(1, EventKind.FLOW_STARTED, status=FlowStatus.RUNNING),
+        event(2, EventKind.TASK_STARTED, task=TASK, status=AttemptStatus.RUNNING),
+        event(
+            3,
+            EventKind.ATTEMPT_FINISHED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.SKIPPED,
+            reason=SkipReason.RESOURCE_CIRCUIT_OPEN,
+            blocked_by=(BLOCKER,),
+        ),
+        event(
+            4,
+            EventKind.TASK_FINISHED,
+            task=TASK,
+            status=AttemptStatus.SKIPPED,
+            reason=SkipReason.RESOURCE_CIRCUIT_OPEN,
+            blocked_by=(BLOCKER,),
+        ),
+        event(5, EventKind.FLOW_FINISHED, status=FlowStatus.SUCCESS),
+    )
+    with pytest.raises(ValueError, match="earlier failed"):
+        validate_event_sequence(events)

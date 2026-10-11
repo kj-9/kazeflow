@@ -28,6 +28,8 @@ class AttemptStatus(str, Enum):
 class SkipReason(str, Enum):
     DEPENDENCY_BLOCKED = "dependency_blocked"
     NO_PARTITION_KEYS = "no_partition_keys"
+    RESOURCE_CIRCUIT_OPEN = "resource_circuit_open"
+    MIXED_BLOCKED = "mixed_blocked"
 
 
 _TERMINAL_ATTEMPT_STATUSES = frozenset(
@@ -74,9 +76,24 @@ def _validate_record_version(schema_version: int) -> None:
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in (1, 2)
+        or schema_version not in (1, 2, 3)
     ):
-        raise ValueError("schema_version must be 1 or 2")
+        raise ValueError("schema_version must be 1, 2, or 3")
+
+
+def _validate_reason_version(reason: SkipReason | None, schema_version: int) -> None:
+    if (
+        schema_version in (1, 2)
+        and reason is not None
+        and reason
+        in {
+            SkipReason.RESOURCE_CIRCUIT_OPEN,
+            SkipReason.MIXED_BLOCKED,
+        }
+    ):
+        raise ValueError(
+            f"{reason.value} cannot be projected as schema version {schema_version}"
+        )
 
 
 def _validate_optional_seconds(value: float | None, field_name: str) -> None:
@@ -275,15 +292,28 @@ class AttemptResult:
             raise ValueError("only a failed attempt may retain failure information")
 
         if self.status is AttemptStatus.SKIPPED:
-            if self.reason is not SkipReason.DEPENDENCY_BLOCKED:
-                raise ValueError("a skipped attempt must be dependency_blocked")
+            if self.reason not in {
+                SkipReason.DEPENDENCY_BLOCKED,
+                SkipReason.RESOURCE_CIRCUIT_OPEN,
+            }:
+                raise ValueError(
+                    "a skipped attempt must be dependency_blocked or resource_circuit_open"
+                )
             if not self.blocked_by:
-                raise ValueError("a dependency-blocked attempt requires blockers")
+                raise ValueError("a blocked attempt requires blockers")
+            if (
+                self.reason is SkipReason.RESOURCE_CIRCUIT_OPEN
+                and len(self.blocked_by) != 1
+            ):
+                raise ValueError(
+                    "a circuit-blocked attempt requires exactly one blocker"
+                )
         elif self.reason is not None or self.blocked_by:
             raise ValueError("only a skipped attempt may have a reason or blockers")
 
     def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
         _validate_record_version(schema_version)
+        _validate_reason_version(self.reason, schema_version)
         record: dict[str, object] = {
             "attempt": self.attempt.to_record(),
             "status": self.status.value,
@@ -294,7 +324,7 @@ class AttemptResult:
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
             "failure": None if self.failure is None else self.failure.to_record(),
         }
-        if schema_version == 2:
+        if schema_version in (2, 3):
             record["invocations"] = [
                 invocation.to_record() for invocation in self.invocations
             ]
@@ -388,16 +418,33 @@ class TaskResult:
             and attempt.reason is SkipReason.DEPENDENCY_BLOCKED
             for attempt in self.attempts
         )
-        if all_dependency_blocked:
+        all_resource_circuit_blocked = all(
+            attempt.status is AttemptStatus.SKIPPED
+            and attempt.reason is SkipReason.RESOURCE_CIRCUIT_OPEN
+            for attempt in self.attempts
+        )
+        all_blocked = all(
+            attempt.status is AttemptStatus.SKIPPED
+            and attempt.reason
+            in {SkipReason.DEPENDENCY_BLOCKED, SkipReason.RESOURCE_CIRCUIT_OPEN}
+            for attempt in self.attempts
+        )
+        if all_blocked:
             expected_blocked_by = tuple(
                 blocker for attempt in self.attempts for blocker in attempt.blocked_by
             )
+            if all_dependency_blocked:
+                expected_reason = SkipReason.DEPENDENCY_BLOCKED
+            elif all_resource_circuit_blocked:
+                expected_reason = SkipReason.RESOURCE_CIRCUIT_OPEN
+            else:
+                expected_reason = SkipReason.MIXED_BLOCKED
             if (
-                self.reason is not SkipReason.DEPENDENCY_BLOCKED
+                self.reason is not expected_reason
                 or self.blocked_by != expected_blocked_by
             ):
                 raise ValueError(
-                    "a dependency-blocked task aggregate must retain all blockers"
+                    "a blocked task aggregate must retain its reason and blockers"
                 )
         elif self.reason is not None or self.blocked_by:
             raise ValueError(
@@ -406,6 +453,7 @@ class TaskResult:
 
     def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
         _validate_record_version(schema_version)
+        _validate_reason_version(self.reason, schema_version)
         return {
             "task": self.task.to_record(),
             "is_partitioned": self.is_partitioned,
@@ -462,6 +510,10 @@ class RunResult:
 
     def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
         _validate_record_version(schema_version)
+        for task in self.tasks:
+            _validate_reason_version(task.reason, schema_version)
+            for attempt in task.attempts:
+                _validate_reason_version(attempt.reason, schema_version)
         return {
             "run_id": self.run_id,
             "status": self.status.value,

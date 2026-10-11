@@ -47,25 +47,26 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 
 2026-10-11のユーザー指示により、Issue [#1](https://github.com/kj-9/kazeflow/issues/1)と
 [#2](https://github.com/kj-9/kazeflow/issues/2)の残タスクをM18・M19より優先する。
-archive済みchangeの完了とIssue全体の完了を区別する。現在の実装は未コミットであり、
-既存差分を保持したうえでレビュー・統合する。
+archive済みchangeの完了とIssue全体の完了を区別する。検証済みの変更は適切な粒度でコミットし、
+既存のローカル差分を保持したうえでレビュー・統合する。
 
 完了した基礎契約:
 
 - #1: `add-flow-scoped-resource-concurrency` — run内のresource共有並行数、plan表示、plan JSON v2。
 - #1: `add-flow-scoped-resource-rate-limit` — run内のresource共有開始数上限、slotを占有しない待機、plan JSON v3。
 - #1: `add-resource-retry-cooldown` — bounded retry、共有cooldown、番号付きinvocation履歴、CLI plan v4/run・history v2。
+- #1: `add-resource-circuit-breaker` — 明示OpenCircuit、最初の原因attempt、pending/retry skip、実行中work・materialization hitの維持。
 - #2: `add-partition-materialization-reuse` — 明示adapter、version/input ID照合、commit後の下流公開、in-memory provenance。
 - #2: `add-file-materialization-adapter` — 明示codec、manifest整合性検証、atomic publication、別プロセスでの再利用。
 
-次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。次は #1 のcircuit breakerを進める。
+次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。次は #1 のpartition outcome queriesを進める。
 
 | 順序 | Issue | Change | 完了条件・依存関係 |
 | --- | --- | --- | --- |
 | 1 | #1 | `add-flow-scoped-resource-rate-limit` | 2026-10-11完了・archive済み。共有時間窓、待機中のslot解放、materialization hitとの整合を検証。 |
 | 2 | #2 | `add-file-materialization-adapter` | 2026-10-11完了・archive済み。明示codec、manifest、atomic publish、fresh process再利用と停止点のexampleを検証。 |
 | 3 | #1 | `add-resource-retry-cooldown` | 2026-10-11完了・archive済み。classifier、permit再取得、slotを占有しない待機、共有cooldown、versioned result/event契約を検証。 |
-| 4 | #1 | `add-resource-circuit-breaker` | 回復不能エラーでpending workを理由付きskip、原因attempt参照、実行中workの扱い。retry/classifier契約に依存。 |
+| 4 | #1 | `add-resource-circuit-breaker` | 2026-10-11完了・archive済み。回復不能エラーの明示分類、原因attempt付きskip、実行中work・materialization hit、versioned record/eventを検証。 |
 | 5 | #1 | `add-partition-outcome-queries` | failed/circuit-skipped key取得、falsey key、unknown/unpartitioned taskの診断。 |
 | 6 | #2 | `record-materialization-provenance` | executed/materializedとIDをportable result、CLI、SQLite、eventへversion管理付きで反映。retry契約と整合。 |
 | 7 | #2 | `add-materialization-invalidation` | 明示invalidation/tombstone、互換性・破損理由、コピー後の古いartifact復活防止。file manifest契約に依存。 |

@@ -9,7 +9,7 @@ from kazeflow.materialization import (
 )
 from kazeflow.plan import FlowPlan
 from kazeflow.results import InvocationResult, RunResult
-from kazeflow.resources import Fail, FailureAction, RateLimit, Retry
+from kazeflow.resources import Fail, FailureAction, OpenCircuit, RateLimit, Retry
 
 
 def test_root_exports_the_core_workflow_and_event_boundary() -> None:
@@ -28,6 +28,7 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
         "Materialization",
         "MaterializationContext",
         "MaterializationRecord",
+        "OpenCircuit",
         "PartitionDef",
         "RateLimit",
         "RunConfig",
@@ -43,6 +44,7 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
     assert kazeflow.InvocationResult is InvocationResult
     assert kazeflow.RateLimit is RateLimit
     assert kazeflow.Fail is Fail
+    assert kazeflow.OpenCircuit is OpenCircuit
     assert kazeflow.Retry is Retry
     assert kazeflow.FailureAction == FailureAction
     assert kazeflow.ResourcePolicy.__name__ == "ResourcePolicy"
