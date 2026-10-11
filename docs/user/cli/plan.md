@@ -24,6 +24,23 @@ kazeflow plan ENTRY \
 | `--max-concurrency N` | Review a positive normalized execution concurrency. |
 | `--verbose` | Add task/configuration detail to text output only. |
 
+Flows may declare named invocation limits with `ResourcePolicy` and associate
+assets via `@asset(resource="network")`. A text plan lists only resources used by
+the selected dependency closure and annotates each associated task. `max_concurrency`
+bounds simultaneous invocations. An optional `RateLimit(requests, per_seconds)`
+bounds asset body invocation starts in each rolling time window. Both limits are
+shared across matching assets and keys within one run. The rate limit counts an asset
+body start after a materialization miss; it does not count cache hits or individual
+API requests, and separate runs have independent limits. Resource names are
+application-chosen metadata and may reveal information, so do not use secrets as
+names.
+
+The same selected resource can configure `max_attempts` and `classify_failure` for
+explicit retries. The plan shows the invocation budget and a boolean indicating
+whether a classifier is configured; it never serializes callback code. The budget
+includes the first invocation. No classifier means no retry, even if the budget is
+greater than one.
+
 Partition selectors are mutually exclusive. A partitioned closure requires exactly
 one selection form; omitting one is a preflight configuration error. Passing any
 selector to an unpartitioned closure is a usage error. Neither case invokes an asset
@@ -53,5 +70,6 @@ kazeflow emits graph source but does not install or invoke Mermaid or Graphviz.
 The JSON plan projection is deterministic and intentionally lossy. It reports the
 selection kind, stable domain, and safe counts rather than serializing arbitrary raw
 partition keys. Text, JSON, Mermaid, and DOT plans preserve this no-raw-key boundary.
-Use JSON instead of parsing text whitespace. The typed envelope, field table, and
-schema are in the [JSON automation contract](json.md#version-1-data-fields).
+Use JSON instead of parsing text whitespace. Plan documents in this unreleased
+change use schema version 4; check the installed package and see the
+[JSON automation contract](json.md) for migration guidance and schemas.

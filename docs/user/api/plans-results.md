@@ -11,3 +11,12 @@ portable projection boundary.
 ## `RunResult`
 
 ::: kazeflow.RunResult
+
+## `InvocationResult`
+
+::: kazeflow.InvocationResult
+
+`AttemptResult.invocations` records body/commit operations only when retry behavior
+is enabled for the resource. The logical partition attempt remains one result with
+one terminal status. `RunResult.to_record()` defaults to record schema v1 for Python
+compatibility; pass `schema_version=2` to include invocation history.

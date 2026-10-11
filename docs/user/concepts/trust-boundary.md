@@ -15,6 +15,13 @@ An asset body is ordinary Python. It can read or write files, use the network,
 launch subprocesses, access credentials, and mutate external systems. A reviewed
 dependency graph is neither a security review nor a proof about those effects.
 
+A selected materialization adapter is also trusted application code. Core checks
+that its returned record matches the requested asset version, partition, and input
+identities, but it cannot prove that the referenced output is durable, atomic, or
+unchanged between resolution and load. The adapter decides how raw partition keys
+and outputs are encoded, validated, stored, and protected. Use an adapter whose
+storage behavior fits the data and concurrency risks of the application.
+
 ## Portable-record boundary
 
 `RunResult.to_record()`, CLI JSON, and SQLite storage deliberately omit arbitrary

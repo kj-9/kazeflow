@@ -30,10 +30,17 @@ enum meanings, and documented array order are append-closed. An incompatible cha
 uses a new schema version for that document type and has a migration note in release
 documentation.
 
-The current alpha binary emits the currently documented schemas. It does not promise
-to parse or emit obsolete versions indefinitely; consumers should pin kazeflow or
-explicitly allow only the document versions they support. A removed documented alpha
-version is announced in release documentation.
+Plan schema v4 and run/history schema v2 are unreleased changes on `main`. Plan v4
+includes selected resource concurrency, rate limit, retry budget, and
+classifier-enabled metadata. Plan schemas v1 through v3 remain available for
+historical consumers. Run-result and history v2 add numbered invocation records,
+while stored rows retain their individual record version in the unchanged SQLite
+layout v1. Check the installed package's emitted versions before choosing a schema.
+See the [JSON migration notes](../cli/json.md#data-fields).
+
+Each published alpha binary emits the schemas documented for its release. Consumers
+should pin kazeflow or explicitly allow only the document versions they support. A
+removed documented alpha version is announced in release documentation.
 
 CLI envelope `schema_version`, nested portable `record_schema_version`, SQLite
 `store_schema_version`, and package version are separate namespaces. See the

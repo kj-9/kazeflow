@@ -1,5 +1,45 @@
 # Release notes
 
+## Unreleased: Local file materialization
+
+- Added opt-in `kazeflow.file_materialization.FileMaterialization` for reuse of
+  committed asset outputs across processes with explicit codecs and a versioned
+  integrity-checked manifest. The standard-library `JsonCodec` accepts strict JSON
+  values only; the adapter does not encrypt or redact stored outputs or keys.
+- Immutable generations are published through an atomic local reference update.
+  The store retains old generations and does not provide invalidation, cleanup,
+  locking, power-loss durability, or network filesystem guarantees. The adapter is
+  synchronous and a commit already running in a worker thread may finish after flow
+  cancellation.
+- Added a three-process example that commits a producer output, fails downstream,
+  then retries downstream while reusing the producer output.
+
+## Unreleased: Flow-scoped resource limits
+
+- `Flow` can declare named `ResourcePolicy` limits for simultaneous invocations
+  and asset body invocation starts over a rolling time window. Rate limits are
+  shared within one run, count body starts rather than API requests, and do not
+  coordinate separate runs.
+- The initial resource policy projection added plan schema v3 with selected
+  concurrency/rate limits and task-resource associations. The retry extension
+  below advances the current main contracts to plan v4 and run/history v2.
+- Plan v1 through v3 schemas and goldens remain available for historical use.
+
+## Unreleased: Resource retry and cooldown
+
+- Resource policies can opt into bounded retries with an explicit synchronous
+  failure classifier. Each retry reacquires concurrency and rolling rate permits;
+  requested backoff and resource cooldown waits release execution capacity.
+- One terminal logical attempt now retains numbered invocation history. Only asset
+  body exceptions are classified; materialization preparation/commit and observer
+  failures are not automatically retried. Application side effects may repeat.
+- Plan JSON advances to v4 with retry budget and classifier-enabled metadata. Run
+  result and history documents advance to v2 and include invocation records. SQLite
+  layout remains schema v1 and can store both legacy record v1 and current record v2.
+- Plan v1-v3 examples remain available for historical consumers; run/history v1
+  records remain readable. Consumers should explicitly accept the new per-type
+  schema versions.
+
 ## CLI compatibility policy
 
 The public `kazeflow` command names, documented options, exit statuses, and JSON

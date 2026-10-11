@@ -41,4 +41,4 @@ Text and JSON outputs omit selected raw keys because this command reports defini
 metadata rather than work selection. JSON is a deterministic automation projection;
 keep diagnostics on standard error separate from successful one-document JSON output.
 Its typed envelope, fields, and normative schema are listed in the
-[JSON automation contract](json.md#version-1-data-fields).
+[JSON automation contract](json.md#data-fields).

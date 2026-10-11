@@ -117,3 +117,91 @@ trust boundary](concepts/trust-boundary.md).
     Planning and `kazeflow partitions` must load trusted Python before inspecting a
     flow. Definition validation happens before asset bodies run, but it does not
     sandbox entry loading or automatically redact application failure metadata.
+
+## Reuse committed partition outputs
+
+Materialization lets a partitioned asset reuse an output that an explicitly
+selected adapter has already committed. It helps when a later step fails and a
+subsequent run repeats the same partition. The default asset path remains ordinary
+Python execution; reuse is enabled per asset and requires both an adapter and a
+non-empty explicit version.
+
+Each materialized asset must be partitioned. Every direct dependency of a
+materialized asset must also be materialized with a version, and those assets must
+share the same partition domain. The input materialization IDs are part of the
+downstream identity, so a changed upstream output does not match the downstream
+record from the previous run.
+
+Bump the version whenever the asset's meaning or output contract changes, including
+changes to logic that should invalidate prior outputs. kazeflow does not hash Python
+source or infer version changes. Planning validates the declaration and selected
+dependency shape, and reports participation without contacting the adapter. A plan
+does not claim that a reusable output exists.
+
+For each selected key, the executor asks the adapter to resolve a record. A
+compatible committed record is loaded and passed to matching downstream work. If
+there is no compatible record, kazeflow invokes the asset body and waits for the
+adapter to commit the output before making it available downstream. Resolve, load,
+or commit failures fail that attempt; a load failure does not silently rerun the
+asset body. See the [Materialization API](api/core.md#materialization-protocol) for
+the protocol types.
+
+### Reuse a file materialization across processes
+
+The standard-library `FileMaterialization` adapter stores committed outputs under
+an explicitly supplied local directory. The
+[runnable example](https://github.com/kj-9/kazeflow/blob/main/examples/file_materialization.py)
+has three invocations: commit the producer, run and fail a downstream asset, then
+start a new process and retry the downstream asset. The producer is loaded from the
+file store on the retry. Each materialized asset declares a non-empty version; bump
+it when its meaning or output contract changes. The example uses `JsonCodec`, so
+its output is restricted to JSON values.
+
+```console
+uv run python examples/file_materialization.py seed --root ./materialized --partition-key 2026-08-11
+uv run python examples/file_materialization.py fail --root ./materialized --partition-key 2026-08-11
+uv run python examples/file_materialization.py retry --root ./materialized --partition-key 2026-08-11
+```
+
+The middle command returns a failed run after the producer has already committed.
+The final command starts a separate process, reuses that committed producer output,
+and executes the downstream asset again.
+
+### Storage and compatibility boundary
+
+The adapter owns storage policy. `FileMaterialization` uses an explicit codec and a
+versioned manifest; the [adapter reference](api/file-materialization.md) documents
+its layout and failure behavior. A missing reference is a cache miss. A malformed
+or incompatible reference, manifest, or payload raises `FileMaterializationError`
+instead of silently rerunning the producer. The adapter verifies payload size and
+SHA-256 before decoding. This detects accidental damage, but does not authenticate
+a store whose manifest and payload can both be changed.
+
+The supplied `JsonCodec` accepts strict JSON values and rejects tuples,
+non-string mapping keys, arbitrary objects, cycles, and non-finite numbers. The
+store contains raw application outputs and typed partition keys, including values
+that may be private. Use a trusted codec and a trusted local root; a custom codec
+is application code and is not sandboxed. JSON encoding is not encryption or
+redaction.
+
+Committed data is published by replacing a small reference to an immutable
+generation. Atomic rename provides visibility on a local filesystem; power-loss
+durability and network filesystem semantics are not guaranteed. Multiple writers
+may race, and the last reference replacement wins. Previous generations are kept;
+there is no cleanup, invalidation, or garbage collection. Synchronous storage calls
+run in worker threads, so cancelling a flow cannot stop a call already in progress;
+an atomic commit may finish and be available to a later process.
+
+The adapter adds no third-party runtime dependency and is opt-in. It does not
+provide cross-run exactly-once execution or an external-sink transaction guarantee.
+
+The in-memory attempt result distinguishes `executed` output from `materialized`
+output and carries its materialization ID. The portable CLI JSON,
+`RunResult.to_record()` shape, and SQLite run-store schema do not include this
+provenance in this version. See [Results and history](results.md) and the
+[trust boundary](concepts/trust-boundary.md) before persisting or sharing diagnostic
+records.
+
+The normal plan-first workflow remains: review the selected assets and partition
+keys, then explicitly run the same selection. CLI JSON and SQLite run history keep
+the existing portable record and do not report reused outputs in this version.

@@ -9,7 +9,7 @@ and complete-stream causal validation.
 The core SHALL expose `EventKind` as a `str`-backed enum with exactly
 `FLOW_STARTED="flow_started"`, `TASK_STARTED="task_started"`,
 `ATTEMPT_STARTED="attempt_started"`, `ATTEMPT_FINISHED="attempt_finished"`,
-`TASK_FINISHED="task_finished"`, and `FLOW_FINISHED="flow_finished"`.
+`TASK_FINISHED="task_finished"`, `FLOW_FINISHED="flow_finished"`, `INVOCATION_STARTED="invocation_started"`, and `INVOCATION_FINISHED="invocation_finished"`.
 
 The core SHALL expose this frozen, slot-based `ExecutionEvent` value and protocol:
 
@@ -20,7 +20,10 @@ ExecutionEvent(run_id: str, sequence: int, occurred_at: datetime, kind: EventKin
                status: FlowStatus | AttemptStatus | None = None,
                reason: SkipReason | None = None,
                blocked_by: tuple[AttemptReference, ...] = (),
-               failure: FailureInfo | None = None)
+               failure: FailureInfo | None = None,
+               invocation_number: int | None = None,
+               retry_delay_seconds: float | None = None,
+               cooldown_seconds: float | None = None)
 ExecutionEventConsumer.on_event(event: ExecutionEvent) -> None
 validate_event_sequence(events: Sequence[ExecutionEvent]) -> None
 ```
@@ -51,8 +54,9 @@ and no task; attempt start SHALL have `AttemptStatus.RUNNING` and attempt finish
 terminal `AttemptStatus`.
 
 `reason` and `blocked_by` SHALL follow the skipped-value rules of the result model.
-`failure` SHALL be present exactly for `attempt_finished` with failed status and
-SHALL be absent for every other event.  Construction SHALL reject incompatible kind,
+`invocation_started` and `invocation_finished` SHALL carry an attempt and a positive one-based invocation number, no task or skip fields. Start SHALL be running; finish SHALL be success or failed. Only failed invocation finishes MAY carry finite non-negative retry-delay/cooldown seconds. Other events SHALL carry no invocation fields.
+
+`failure` SHALL be present exactly for failed `attempt_finished` or failed `invocation_finished` and SHALL be absent for every other event.  Construction SHALL reject incompatible kind,
 identity, status, reason, blocker, or failure combinations.
 
 #### Scenario: A terminal failed attempt is complete without a result object
@@ -67,13 +71,15 @@ identity, status, reason, blocker, or failure combinations.
 
 ### Requirement: Event payloads and records exclude result objects and raw payloads
 `ExecutionEvent` SHALL NOT accept or carry a `RunResult`, `TaskResult`,
-`AttemptResult`, raw asset output, or raw exception object.  Its `to_record()` SHALL
-return exactly these keys:
+`AttemptResult`, raw asset output, or raw exception object.  Its explicit version 1 projection SHALL preserve the historical keys for legacy lifecycle kinds and reject invocation kinds. Its default version 2 `to_record()` SHALL return exactly these keys:
 
 ```text
 {"run_id", "sequence", "occurred_at", "kind", "task", "attempt", "status",
- "reason", "blocked_by", "failure"}
+ "reason", "blocked_by", "failure", "schema_version", "invocation_number",
+ "retry_delay_seconds", "cooldown_seconds"}
 ```
+
+Version 2 SHALL contain `schema_version: 2`; unsupported and boolean versions SHALL be rejected.
 
 The `task`, `attempt`, and `failure` values SHALL be their result-model record
 projections or `null`; enum values SHALL be strings; blockers SHALL be an ordered
@@ -104,6 +110,12 @@ additional ordering between independent concurrent branches.
 - **WHEN** a stream skips a sequence number, finishes a task before one of its
   attempts, or places a start after its matching finish
 - **THEN** `validate_event_sequence` raises `ValueError`
+
+Numbered invocation pairs SHALL be contiguous per logical attempt, occur after its logical start and before its logical finish, and have exactly one start/finish per number. A new invocation SHALL follow a failed prior invocation with a retry delay; duplicate, overlapping, skipped-number, post-success or unfinished invocations SHALL be rejected. Invocations SHALL only be emitted for resource policies with a classifier or a maximum count above one; ordinary runs retain their legacy event-kind sequence. A success/failed logical finish with numbered invocations SHALL match its final invocation status and SHALL NOT occur while another retry is scheduled.
+
+#### Scenario: Retry lifecycle remains causal
+- **WHEN** an enabled attempt retries after its first invocation fails
+- **THEN** invocation 1 finishes before invocation 2 starts and the logical attempt finishes only after invocation 2
 
 ### Requirement: Event values and consumers are passive model-layer constructs
 `ExecutionEvent` values and `validate_event_sequence` SHALL not print, configure

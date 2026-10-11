@@ -14,6 +14,11 @@ with SQLiteRunStore("runs.sqlite3") as store:
 Constructing a store creates or initializes schema version 1. It stores portable
 records, not reconstructed in-memory `RunResult` objects.
 
+The database layout version is independent of the portable record version. Schema
+version 1 can contain older record v1 rows and newly saved record v2 rows; saving
+does not rewrite existing rows. `StoredRunRecord.schema_version` identifies the
+record version for that row.
+
 ## `SQLiteRunStore`
 
 ::: kazeflow.sqlite_store.SQLiteRunStore

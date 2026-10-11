@@ -8,7 +8,7 @@ record projections.
 ### Requirement: Core exposes exact immutable result value types
 The core SHALL expose frozen, slot-based dataclasses named `TaskReference`,
 `AttemptReference`, `FailureInfo`, `AttemptResult`, `TaskResult`, and `RunResult`,
-plus `str`-backed enums `FlowStatus`, `AttemptStatus`, and `SkipReason`.  Their
+plus `str`-backed enums `FlowStatus`, `AttemptStatus`, and `SkipReason`. Their
 fields, types, and defaults SHALL be exactly those listed below:
 
 ```text
@@ -27,7 +27,9 @@ AttemptResult(attempt: AttemptReference, status: AttemptStatus,
               output: object = None, exception: BaseException | None = None,
               failure: FailureInfo | None = None,
               reason: SkipReason | None = None,
-              blocked_by: tuple[AttemptReference, ...] = ())
+              blocked_by: tuple[AttemptReference, ...] = (),
+              resolution: str | None = None,
+              materialization_id: str | None = None)
 TaskResult(task: TaskReference, is_partitioned: bool, status: AttemptStatus,
            started_at: datetime, ended_at: datetime, duration: timedelta,
            attempts: tuple[AttemptResult, ...] = (),
@@ -38,10 +40,16 @@ RunResult(run_id: str, status: FlowStatus, started_at: datetime,
           tasks: tuple[TaskResult, ...] = ())
 ```
 
-`TaskReference.task_name` and `RunResult.run_id` SHALL be non-empty strings.  An
+`resolution` SHALL be `executed` or `materialized` for successful attempts and
+`None` for other statuses. `materialization_id` SHALL be present only for a
+successful materialized asset attempt with a committed record; it SHALL be absent
+for ordinary successful attempts and failures. These fields are in-memory only
+in this change; existing `to_record()` keys and schemas SHALL remain unchanged.
+
+`TaskReference.task_name` and `RunResult.run_id` SHALL be non-empty strings. An
 absent partition SHALL be represented only by `partition_key_present=False` and
 `partition_key=None`; a present partition SHALL have
-`partition_key_present=True` and a non-`None` raw key.  Result collection fields
+`partition_key_present=True` and a non-`None` raw key. Result collection fields
 SHALL remain tuples and result envelopes SHALL not be structurally mutable.
 
 #### Scenario: A falsey partition key remains present
@@ -53,6 +61,10 @@ SHALL remain tuples and result envelopes SHALL not be structurally mutable.
 - **WHEN** a reference has an absent partition with a non-`None` key or a present
   partition with `None` as its key
 - **THEN** construction raises `ValueError`
+
+#### Scenario: A reused attempt is identifiable in memory
+- **WHEN** a committed materialization supplies a successful attempt's output
+- **THEN** that attempt's in-memory resolution is `materialized` and it has a committed materialization identifier while its portable record retains the existing shape
 
 ### Requirement: Result snapshots are completed, time-valid terminal outcomes
 `AttemptResult` and `TaskResult` SHALL accept only terminal `AttemptStatus` values:
@@ -149,3 +161,17 @@ tuple orders.
 - **WHEN** a present partition key is an arbitrary non-serializable object
 - **THEN** its attempt record contains `partition: {"present": true}` and contains
   no raw partition-key field
+
+### Requirement: Numbered invocation history preserves logical result semantics
+A logical attempt SHALL optionally retain an immutable ordered invocation history. Each entry SHALL carry a contiguous one-based number, success/failed status, UTC start/end and non-negative duration, failure metadata exactly for failed invocations, and nullable applied retry delay and cooldown seconds. Enabled policies SHALL record each body-plus-commit operation; materialization hits and failures before a body SHALL have empty history. A failed entry SHALL not force the logical aggregate to fail when a later invocation succeeds. Constructor validation SHALL reject malformed history and delay fields. For a normal success/failed logical outcome with nonempty history, its final status SHALL match the final invocation and its final invocation SHALL NOT retain a scheduled retry delay.
+
+#### Scenario: Recover after an initial failure
+- **WHEN** a logical partition attempt fails once and then succeeds
+- **THEN** its final status is success and its ordered history contains failed invocation 1 followed by successful invocation 2
+
+### Requirement: Result projections support explicit portable record versions
+Existing zero-argument result projections SHALL preserve portable record version 1. Explicit version 2 projections SHALL add an ordered `invocations` array to each attempt, with number, status, start/end/duration, nullable failure, retry-delay and cooldown seconds. Other record fields SHALL remain identical. Unknown or boolean versions SHALL be rejected. Both projections SHALL omit raw outputs, raw exceptions, raw partition keys, classifier code and materialization provenance.
+
+#### Scenario: Export retry history safely
+- **WHEN** a recovered result is projected explicitly as portable record version 2
+- **THEN** its invocation history is included without raw output/exception/key values and version 1 remains available with its original shape

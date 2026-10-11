@@ -4,6 +4,9 @@ Use `--format json` when another program consumes kazeflow output. Human-readabl
 text is for review and can change in layout; automation must not parse it. A
 successful JSON command writes exactly one typed document to standard output.
 
+Version note: plan v4 and run/history v2 are unreleased changes on `main`. Use the
+schema matching the installed package, not necessarily the newest source tree.
+
 ## Common envelope
 
 Every completed JSON response has exactly these top-level fields:
@@ -11,7 +14,7 @@ Every completed JSON response has exactly these top-level fields:
 ```json
 {
   "document_type": "kazeflow.plan",
-  "schema_version": 1,
+  "schema_version": 4,
   "data": {}
 }
 ```
@@ -24,15 +27,17 @@ one your consumer explicitly supports.
 | --- | --- | --- | --- |
 | `assets --format json` | `kazeflow.assets` | [`assets.schema.json`](../schemas/cli/v1/assets.schema.json) | [`assets`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/assets.json) |
 | `partitions --format json` | `kazeflow.partitions` | [`partitions.schema.json`](../schemas/cli/v1/partitions.schema.json) | [`partitions`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/partitions.json) |
-| `plan --format json` | `kazeflow.plan` | [`plan.schema.json`](../schemas/cli/v1/plan.schema.json) | [`key selection`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/plan-keys.json), [`range`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/plan-range.json), [`empty`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/plan-empty.json) |
-| completed `run --format json` | `kazeflow.run-result` | [`run-result.schema.json`](../schemas/cli/v1/run-result.schema.json) | [`success`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/run-success.json), [`asset failure`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/run-failed.json) |
+| `plan --format json` | `kazeflow.plan` v4 | [`plan.schema.json`](../schemas/cli/v4/plan.schema.json) | [`key selection`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/plan-keys.json), [`range`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/plan-range.json), [`empty`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/plan-empty.json), [`retry policy`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/plan-retry.json) |
+| completed `run --format json` | `kazeflow.run-result` v2 | [`run-result.schema.json`](../schemas/cli/v4/run-result.schema.json) | [`success`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/run-success.json), [`asset failure`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/run-failed.json) |
 | declined interactive JSON run | `kazeflow.run-declined` | [`run-declined.schema.json`](../schemas/cli/v1/run-declined.schema.json) | [`declined`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/run-declined.json) |
-| `runs list --format json` | `kazeflow.runs-list` | [`runs-list.schema.json`](../schemas/cli/v1/runs-list.schema.json) | [`runs list`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/runs-list.json) |
-| `runs show --format json` | `kazeflow.runs-show` | [`runs-show.schema.json`](../schemas/cli/v1/runs-show.schema.json) | [`runs show`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/runs-show.json) |
-| `runs compare --format json` | `kazeflow.runs-compare` | [`runs-compare.schema.json`](../schemas/cli/v1/runs-compare.schema.json) | [`runs compare`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v1/runs-compare.json) |
+| `runs list --format json` | `kazeflow.runs-list` v2 | [`runs-list.schema.json`](../schemas/cli/v4/runs-list.schema.json) | [`runs list`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/runs-list.json) |
+| `runs show --format json` | `kazeflow.runs-show` v2 | [`runs-show.schema.json`](../schemas/cli/v4/runs-show.schema.json) | [`runs show`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/runs-show.json) |
+| `runs compare --format json` | `kazeflow.runs-compare` v2 | [`runs-compare.schema.json`](../schemas/cli/v4/runs-compare.schema.json) | [`runs compare`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v4/runs-compare.json) |
 
-The schemas are normative Draft 2020-12 documents. The combined schema and its
-shared definitions are also available as [`schema.json`](../schemas/cli/v1/schema.json).
+The schemas are normative Draft 2020-12 documents. Assets, partitions, and declined
+run documents remain at version 1. The v1, v2, and v3 plan schemas and goldens are
+retained for historical consumers. The shared v4 schema documents current versions:
+plan v4, run-result and history v2, and other document types v1.
 The checked-in examples are normalized only where values necessarily vary between
 runs, such as run IDs, timestamps, durations, and traceback locations.
 
@@ -53,15 +58,15 @@ separate Python and storage contract:
 ```json
 {
   "document_type": "kazeflow.run-result",
-  "schema_version": 1,
+  "schema_version": 2,
   "data": {
-    "record_schema_version": 1,
+    "record_schema_version": 2,
     "record": {"run_id": "…", "status": "success", "tasks": []}
   }
 }
 ```
 
-## Version-1 data fields
+## Data fields
 
 The JSON Schemas above are the complete machine-readable definitions. This table is
 the command-oriented field reference.
@@ -70,16 +75,22 @@ the command-oriented field reference.
 | --- | --- |
 | `kazeflow.assets` | `declared_flow` (boolean) and `assets` (ordered asset records). Each asset has `name`, `dependencies`, and `partitioned`. |
 | `kazeflow.partitions` | `targets` and `partitions`. Each partition record has `asset`, `definition_kind`, `domain`, `key_format`, and `supports_range`. |
-| `kazeflow.plan` | `targets`, `config`, and dependency-first `tasks`. `config` has `max_concurrency` and `partition_selection`; each task has `name`, `dependencies`, and `partition_selection`. A selection has `kind`, `domain`, and `count`. |
-| `kazeflow.run-result` | `record_schema_version` and one portable `record`. |
+| `kazeflow.plan` v4 | `targets`, selected `resources`, `config`, and dependency-first `tasks`. Each resource has `name`, `max_concurrency`, nullable `rate_limit`, `max_attempts`, and `classifier_enabled`; callback code is never projected. |
+| `kazeflow.run-result` v2 | `record_schema_version: 2` and a portable record with an `invocations` array on each logical attempt. |
 | `kazeflow.run-declined` | `reason`, currently `not_approved`. It is not a `RunResult`. |
-| `kazeflow.runs-list` | `runs`, whose summaries have `run_id`, `record_schema_version`, `status`, and `saved_at`. |
-| `kazeflow.runs-show` | `run_id`, `record_schema_version`, `status`, `saved_at`, `store_schema_version`, and portable `record`. |
-| `kazeflow.runs-compare` | `left`, `right`, and `comparison`. `left` and `right` use the stored-run shape; `comparison` has flow deltas and ordered task aggregate comparisons. |
+| `kazeflow.runs-list` v2 | `runs`, with each summary reporting `record_schema_version` (1 or 2), `status`, and `saved_at`. |
+| `kazeflow.runs-show` v2 | `run_id`, per-record `record_schema_version`, `status`, `saved_at`, `store_schema_version`, and a v1 or v2 portable record. |
+| `kazeflow.runs-compare` v2 | `left`, `right`, and `comparison`. Each stored side retains its own record version; comparison has flow deltas and ordered task aggregate comparisons. |
 
 `partition_selection.kind` is one of `omitted`, `keys`, `range`, `empty`, or
 `unpartitioned`; `domain` and `count` are nullable only where that kind has no
 partitioned selection. `max_concurrency` is a positive integer or `null`.
+Resource summaries are name-sorted and include only policies used by selected
+tasks. A non-null `rate_limit` bounds body invocation starts in a rolling window;
+`max_attempts` is the operation budget and `classifier_enabled` reveals whether a
+callback is configured without serializing its code. A v1 plan consumer can migrate
+through v2/v3 or directly to v4, adding the resource array, nullable task resource,
+rate limit, and retry metadata.
 
 ### Portable record shape
 
@@ -88,8 +99,16 @@ UTC `started_at`/`ended_at`, `duration_seconds`, and ordered `tasks`. A task ret
 `task.task_name`, `is_partitioned`, terminal `status`, timestamps, duration,
 nullable `reason`, `blocked_by`, and ordered `attempts`. An attempt retains its
 `attempt.task.task_name`, structural `attempt.partition.present` boolean, status,
-timestamps, duration, nullable reason, blockers, and nullable portable `failure`.
+timestamps, duration, nullable reason, blockers, nullable portable `failure`, and
+`invocations`. Each invocation has a contiguous one-based number, success/failed
+status, start/end timestamps, duration, nullable failure, and nullable retry and
+resource-cooldown seconds. Invocation retries do not create extra logical attempts.
 Failure metadata contains `exception_type`, `message`, and `traceback`.
+
+CLI-produced run records use record v2. `RunResult.to_record()` still defaults to
+v1 for Python callers unless they request `schema_version=2`. SQLite layout remains
+store schema v1; it can contain legacy record v1 and new record v2 rows, reported
+independently by each history envelope.
 
 `comparison` contains `status_changed`, `duration_seconds_delta`,
 `task_count_delta`, and ordered `tasks`. Each task comparison has `task_name`,

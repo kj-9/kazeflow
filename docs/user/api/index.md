@@ -9,6 +9,8 @@ end-to-end workflow rather than individual definitions.
 | Asset declaration and execution entry points | [Core API](core.md) |
 | Pre-execution and terminal models | [Plans and results](plans-results.md) |
 | Progress-consumer contracts | [Events](events.md) |
+| Partition output reuse | [Materialization protocol](core.md#materialization-protocol) |
+| Local file materialization | [File materialization adapter](file-materialization.md) |
 | Explicit local persistence | [SQLite adapter](sqlite.md) |
 
 Only public contracts are included. Private executor and CLI implementation details

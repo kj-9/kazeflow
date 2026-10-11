@@ -44,6 +44,14 @@ failure messages and tracebacks can contain sensitive application values. See th
 For the typed envelope, separate portable-record version, schema, and exit behavior,
 see the [JSON automation contract](json.md).
 
+When a selected resource has an explicit failure classifier, a retry-enabled run
+records numbered body/commit invocations under the single logical task or partition
+attempt. Only asset body exceptions reach the classifier. Each retry reacquires
+resource concurrency/rate permits. Requested delay and shared cooldown waits release
+the execution slot so independent branches can progress. CLI run results use
+record schema v2; Python `RunResult.to_record()` keeps its v1 default unless v2 is
+requested explicitly.
+
 ## Optional adapters
 
 ```console
