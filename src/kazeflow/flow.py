@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
 import logging
+import inspect
 import time
 import traceback
 from typing import Any, Optional, TypedDict
@@ -20,6 +22,11 @@ from .events import (
     validate_event_sequence,
 )
 from .plan import FlowPlan, PlanConfig, TaskPlan, build_flow_plan
+from .materialization import (
+    MaterializationContext,
+    call_materialization,
+    record_matches_context,
+)
 from .partition import PartitionKeys
 from .results import (
     AttemptReference,
@@ -27,11 +34,13 @@ from .results import (
     AttemptStatus,
     FailureInfo,
     FlowStatus,
+    InvocationResult,
     RunResult,
     SkipReason,
     TaskReference,
     TaskResult,
 )
+from .resources import Fail, ResourcePolicy, Retry, _RateWindow
 
 
 class RunConfig(TypedDict, total=False):
@@ -45,9 +54,38 @@ class _AttemptState:
     reference: AttemptReference
     partition_key: object | None
     result: AttemptResult | None = None
-    future: asyncio.Task[object] | None = None
+    future: asyncio.Task[_InvocationOutcome | _PreparedInvocation] | None = None
     started_at: datetime | None = None
     started_monotonic: float | None = None
+    prepared: _PreparedInvocation | None = None
+    resource_reserved: bool = False
+    ready_at: float = 0.0
+    invocation_number: int = 0
+    invocation_started_at: datetime | None = None
+    invocation_started_monotonic: float | None = None
+    invocations: tuple[InvocationResult, ...] = ()
+
+
+class _BodyFailure(Exception):
+    """Identify retryable body failures separately from adapter failures."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        super().__init__(str(error))
+
+
+@dataclass(frozen=True, slots=True)
+class _InvocationOutcome:
+    output: object
+    resolution: str
+    materialization_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedInvocation:
+    context: AssetContext
+    inputs: dict[str, Any]
+    identity: MaterializationContext
 
 
 @dataclass(slots=True)
@@ -72,8 +110,10 @@ class Flow:
         targets: list[str] | tuple[str, ...] | dict[str, set[str]],
         *,
         registry: AssetRegistry = default_registry,
+        resources: Mapping[str, ResourcePolicy] | None = None,
     ) -> None:
         self.registry = registry
+        self.resources = dict(resources) if resources is not None else {}
         self.graph: dict[str, set[str]] = {}
         self._legacy_graph: dict[str, set[str]] | None = None
         if isinstance(targets, dict):
@@ -108,7 +148,12 @@ class Flow:
     def plan(self, run_config: Optional[RunConfig] = None) -> FlowPlan:
         """Return the fully validated plan without invoking an asset."""
         config = _plan_config(run_config)
-        plan = build_flow_plan(self.targets, config=config, registry=self.registry)
+        plan = build_flow_plan(
+            self.targets,
+            config=config,
+            registry=self.registry,
+            resources=self.resources,
+        )
         if self._legacy_graph is not None:
             _validate_legacy_graph(self._legacy_graph, plan)
         return plan
@@ -131,7 +176,9 @@ class Flow:
     ) -> RunResult:
         """Execute one already validated plan without normalizing it again."""
         self.asset_outputs = {}
-        executor = _Executor(plan, self.registry, self.asset_outputs, event_consumer)
+        executor = _Executor(
+            plan, self.registry, self.asset_outputs, event_consumer, self.resources
+        )
         return await executor.run()
 
 
@@ -204,6 +251,7 @@ class _Executor:
         registry: AssetRegistry,
         asset_outputs: dict[str, Any],
         consumer: ExecutionEventConsumer | None,
+        resources: Mapping[str, ResourcePolicy],
     ) -> None:
         self.plan = plan
         self.registry = registry
@@ -214,7 +262,26 @@ class _Executor:
         self.run_id = str(uuid4())
         self.events: list[ExecutionEvent] = []
         self._sequence = 0
-        self._running: dict[asyncio.Task[object], _AttemptState] = {}
+        self._running: dict[
+            asyncio.Task[_InvocationOutcome | _PreparedInvocation], _AttemptState
+        ] = {}
+        self._resource_running: dict[str, int] = {}
+        self._policies = {
+            resource.name: resources[resource.name] for resource in plan.resources
+        }
+        self._cooldowns: dict[str, float] = {}
+        self._resource_limits = {
+            resource.name: resource.max_concurrency for resource in plan.resources
+        }
+        self._rate_windows = {
+            resource.name: _RateWindow(resource.rate_limit)
+            for resource in plan.resources
+            if resource.rate_limit is not None
+        }
+        self._rate_deadline: float | None = None
+        self._admission_wakeup: asyncio.Future[None] = (
+            asyncio.get_running_loop().create_future()
+        )
         self.tasks = {task.name: self._make_task_state(task) for task in plan.tasks}
 
     def _make_task_state(self, task: TaskPlan) -> _TaskState:
@@ -278,23 +345,34 @@ class _Executor:
                 selected = self._next_action()
                 if selected is None:
                     break
-                state, action = selected
+                state, attempt, blocked = selected
                 self._start_task(state)
-                if action == "blocked":
-                    self._finish_blocked(state)
+                if blocked:
+                    self._finish_blocked(state, attempt)
                     changed = True
                     continue
-                attempt = action
-                assert isinstance(attempt, _AttemptState)
                 self._start_attempt(state, attempt)
                 changed = True
             if self._running:
+                # A body records its actual launch time after create_task runs.
+                # That wakeup lets us compute a deadline even if it remains busy.
+                timeout = None
+                if len(self._running) < limit and self._rate_deadline is not None:
+                    timeout = max(0.0, self._rate_deadline - time.monotonic())
                 done, _ = await asyncio.wait(
-                    self._running, return_when=asyncio.FIRST_COMPLETED
+                    (*self._running, self._admission_wakeup),
+                    timeout=timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                for future in done:
-                    attempt = self._running.pop(future)
-                    self._finish_running_attempt(attempt, future)
+                if self._admission_wakeup in done:
+                    self._admission_wakeup = asyncio.get_running_loop().create_future()
+                for future in tuple(self._running):
+                    if future in done:
+                        attempt = self._running.pop(future)
+                        self._finish_running_attempt(attempt, future)
+                continue
+            if self._rate_deadline is not None:
+                await asyncio.sleep(max(0.0, self._rate_deadline - time.monotonic()))
                 continue
             if changed:
                 continue
@@ -302,7 +380,9 @@ class _Executor:
                 "valid FlowPlan contains work that cannot become eligible"
             )
 
-    def _next_action(self) -> tuple[_TaskState, _AttemptState | str] | None:
+    def _next_action(self) -> tuple[_TaskState, _AttemptState, bool] | None:
+        self._rate_deadline = None
+        now = time.monotonic()
         for task_plan in self.plan.tasks:
             task = self.tasks[task_plan.name]
             if task.result is not None:
@@ -312,10 +392,46 @@ class _Executor:
                     continue
                 eligibility = self._eligibility(task, attempt)
                 if eligibility == "ready":
-                    return task, attempt
+                    if task.plan.materialization_enabled and attempt.prepared is None:
+                        return task, attempt, False
+                    resource = task.plan.resource_name
+                    if (
+                        resource is not None
+                        and self._resource_running.get(resource, 0)
+                        >= self._resource_limits[resource]
+                    ):
+                        continue
+                    window = (
+                        self._rate_windows.get(resource)
+                        if resource is not None
+                        else None
+                    )
+                    ready_at = max(attempt.ready_at, self._cooldowns.get(resource, 0.0))
+                    if window is not None and not window.ready(now):
+                        deadline = window.deadline(now)
+                        if deadline is not None:
+                            self._wait_until(max(ready_at, deadline))
+                        continue
+                    if ready_at > now:
+                        self._wait_until(ready_at)
+                        continue
+                    return task, attempt, False
                 if eligibility == "blocked":
-                    return task, "blocked"
+                    return task, attempt, True
         return None
+
+    def _wait_until(self, deadline: float) -> None:
+        self._rate_deadline = (
+            deadline
+            if self._rate_deadline is None
+            else min(self._rate_deadline, deadline)
+        )
+
+    def _retry_enabled(self, resource: str | None) -> bool:
+        policy = self._policies.get(resource) if resource is not None else None
+        return policy is not None and (
+            policy.max_attempts > 1 or policy.classify_failure is not None
+        )
 
     def _start_task(self, task: _TaskState) -> None:
         if task.started_at is None:
@@ -328,26 +444,143 @@ class _Executor:
             )
 
     def _start_attempt(self, task: _TaskState, attempt: _AttemptState) -> None:
-        self._emit(
-            EventKind.ATTEMPT_STARTED,
-            attempt=attempt.reference,
-            status=AttemptStatus.RUNNING,
-        )
-        attempt.started_at = _utc_now()
-        attempt.started_monotonic = time.monotonic()
-        inputs = self._inputs(task, attempt)
-        asset = self.registry.get(task.plan.name)
-        context = AssetContext(
-            task.plan.name, logging.getLogger("kazeflow.assets"), attempt.partition_key
-        )
-        future = asyncio.create_task(asset.invoke(context, inputs))
+        if attempt.started_at is None:
+            self._emit(
+                EventKind.ATTEMPT_STARTED,
+                attempt=attempt.reference,
+                status=AttemptStatus.RUNNING,
+            )
+            attempt.started_at = _utc_now()
+            attempt.started_monotonic = time.monotonic()
+        preparing = task.plan.materialization_enabled and attempt.prepared is None
+        resource = task.plan.resource_name
+        if not preparing and resource is not None:
+            window = self._rate_windows.get(resource)
+            if window is not None:
+                window.reserve(time.monotonic())
+            attempt.resource_reserved = True
+            self._resource_running[resource] = (
+                self._resource_running.get(resource, 0) + 1
+            )
+        if not preparing:
+            attempt.invocation_number += 1
+            if self._retry_enabled(resource):
+                attempt.invocation_started_at = _utc_now()
+                attempt.invocation_started_monotonic = time.monotonic()
+                self._emit(
+                    EventKind.INVOCATION_STARTED,
+                    attempt=attempt.reference,
+                    status=AttemptStatus.RUNNING,
+                    invocation_number=attempt.invocation_number,
+                )
+        future = asyncio.create_task(self._run_attempt(task, attempt, preparing))
         attempt.future = future
         self._running[future] = attempt
 
+    async def _run_attempt(
+        self,
+        task: _TaskState,
+        attempt: _AttemptState,
+        preparing: bool,
+    ) -> _InvocationOutcome | _PreparedInvocation:
+        if preparing:
+            return await self._prepare_materialization(task, attempt)
+        return await self._invoke_body(task, attempt)
+
+    async def _prepare_materialization(
+        self, task: _TaskState, attempt: _AttemptState
+    ) -> _InvocationOutcome | _PreparedInvocation:
+        asset = self.registry.get(task.plan.name)
+        adapter = asset.materialization
+        assert adapter is not None and asset.version is not None
+        assert task.plan.partition_domain is not None
+        input_ids: list[tuple[str, str]] = []
+        for dependency_name in task.plan.dependencies:
+            dependency = self.tasks[dependency_name]
+            matching = next(
+                item
+                for item in dependency.attempts
+                if item.partition_key == attempt.partition_key
+            )
+            assert matching.result is not None
+            committed_id = matching.result.materialization_id
+            assert committed_id is not None
+            input_ids.append((dependency_name, committed_id))
+        identity = MaterializationContext(
+            asset_name=task.plan.name,
+            version=asset.version,
+            partition_domain=task.plan.partition_domain,
+            partition_key_present=attempt.reference.partition_key_present,
+            partition_key=attempt.partition_key,
+            input_materialization_ids=tuple(input_ids),
+        )
+        candidate = await call_materialization(adapter.resolve, identity)
+        if record_matches_context(candidate, identity):
+            output = await call_materialization(adapter.load, candidate)
+            return _InvocationOutcome(
+                output, "materialized", candidate.materialization_id
+            )
+        context = AssetContext(
+            task.plan.name, logging.getLogger("kazeflow.assets"), attempt.partition_key
+        )
+        return _PreparedInvocation(context, self._inputs(task, attempt), identity)
+
+    async def _invoke_body(
+        self, task: _TaskState, attempt: _AttemptState
+    ) -> _InvocationOutcome:
+        asset = self.registry.get(task.plan.name)
+        prepared = attempt.prepared
+        context = (
+            prepared.context
+            if prepared is not None
+            else AssetContext(
+                task.plan.name,
+                logging.getLogger("kazeflow.assets"),
+                attempt.partition_key,
+            )
+        )
+        inputs = (
+            prepared.inputs if prepared is not None else self._inputs(task, attempt)
+        )
+        resource = task.plan.resource_name
+        window = self._rate_windows.get(resource) if resource is not None else None
+        if window is not None:
+            window.record_start(time.monotonic())
+            if not self._admission_wakeup.done():
+                self._admission_wakeup.set_result(None)
+        context.invocation_number = attempt.invocation_number
+        try:
+            output = await asset.invoke(context, inputs)
+        except Exception as error:
+            raise _BodyFailure(error) from error
+        if prepared is None:
+            return _InvocationOutcome(output, "executed")
+        adapter = asset.materialization
+        assert adapter is not None
+        committed = await call_materialization(
+            adapter.commit, prepared.identity, output
+        )
+        if not record_matches_context(committed, prepared.identity):
+            raise ValueError(
+                f"materialization commit for asset '{task.plan.name}' returned an invalid or uncommitted record"
+            )
+        return _InvocationOutcome(output, "executed", committed.materialization_id)
+
     def _finish_running_attempt(
-        self, attempt: _AttemptState, future: asyncio.Task[object]
+        self,
+        attempt: _AttemptState,
+        future: asyncio.Task[_InvocationOutcome | _PreparedInvocation],
     ) -> None:
         attempt.future = None
+        task_state = self.tasks[attempt.reference.task.task_name]
+        resource = task_state.plan.resource_name
+        if attempt.resource_reserved and resource is not None:
+            attempt.resource_reserved = False
+            remaining = self._resource_running[resource] - 1
+            if remaining:
+                self._resource_running[resource] = remaining
+            else:
+                del self._resource_running[resource]
         ended_at = _utc_now()
         started_at = attempt.started_at or ended_at
         duration = timedelta(
@@ -356,21 +589,76 @@ class _Executor:
             )
         )
         try:
-            output = future.result()
+            outcome = future.result()
         except Exception as error:
-            failure = FailureInfo(
-                type(error).__name__,
-                str(error),
-                "".join(traceback.format_exception(error)),
+            body_failed = isinstance(error, _BodyFailure)
+            original = error.error if isinstance(error, _BodyFailure) else error
+            original_failure = _failure_info(original)
+            action: Fail | Retry = Fail()
+            classification_error: Exception | None = None
+            policy = self._policies.get(resource) if resource is not None else None
+            if (
+                body_failed
+                and policy is not None
+                and policy.classify_failure is not None
+            ):
+                try:
+                    selected = policy.classify_failure(original)
+                    if isinstance(selected, Retry):
+                        action = Retry(
+                            selected.after_seconds, selected.cooldown_resource
+                        )
+                    elif isinstance(selected, Fail):
+                        action = Fail()
+                    else:
+                        if inspect.iscoroutine(selected):
+                            selected.close()
+                        raise TypeError("failure classifier must return Fail or Retry")
+                except Exception as callback_error:
+                    classification_error = callback_error
+            now = time.monotonic()
+            cooldown = None
+            if (
+                isinstance(action, Retry)
+                and action.cooldown_resource
+                and resource is not None
+            ):
+                cooldown = action.after_seconds
+                self._cooldowns[resource] = max(
+                    self._cooldowns.get(resource, 0.0), now + cooldown
+                )
+            retry_delay = (
+                action.after_seconds
+                if isinstance(action, Retry)
+                and classification_error is None
+                and policy is not None
+                and attempt.invocation_number < policy.max_attempts
+                else None
             )
+            self._record_invocation(
+                attempt,
+                AttemptStatus.FAILED,
+                ended_at,
+                failure=original_failure,
+                retry_delay=retry_delay,
+                cooldown=cooldown,
+            )
+            if retry_delay is not None:
+                attempt.ready_at = now + retry_delay
+                return
+            terminal_error = (
+                classification_error if classification_error is not None else original
+            )
+            failure = _failure_info(terminal_error)
             attempt.result = AttemptResult(
                 attempt.reference,
                 AttemptStatus.FAILED,
                 started_at,
                 ended_at,
                 duration,
-                exception=error,
+                exception=terminal_error,
                 failure=failure,
+                invocations=attempt.invocations,
             )
             self._emit(
                 EventKind.ATTEMPT_FINISHED,
@@ -379,16 +667,23 @@ class _Executor:
                 failure=failure,
             )
         else:
+            if isinstance(outcome, _PreparedInvocation):
+                attempt.prepared = outcome
+                return
+            self._record_invocation(attempt, AttemptStatus.SUCCESS, ended_at)
             attempt.result = AttemptResult(
                 attempt.reference,
                 AttemptStatus.SUCCESS,
                 started_at,
                 ended_at,
                 duration,
-                output=output,
+                output=outcome.output,
+                resolution=outcome.resolution,
+                materialization_id=outcome.materialization_id,
+                invocations=attempt.invocations,
             )
             self._store_compat_output(
-                self.tasks[attempt.reference.task.task_name], attempt, output
+                self.tasks[attempt.reference.task.task_name], attempt, outcome.output
             )
             self._emit(
                 EventKind.ATTEMPT_FINISHED,
@@ -396,12 +691,45 @@ class _Executor:
                 status=AttemptStatus.SUCCESS,
             )
 
-    def _finish_blocked(self, task: _TaskState) -> None:
-        attempt = next(
-            candidate
-            for candidate in task.attempts
-            if candidate.result is None and candidate.future is None
+    def _record_invocation(
+        self,
+        attempt: _AttemptState,
+        status: AttemptStatus,
+        ended_at: datetime,
+        *,
+        failure: FailureInfo | None = None,
+        retry_delay: float | None = None,
+        cooldown: float | None = None,
+    ) -> None:
+        if attempt.invocation_started_at is None:
+            return
+        assert attempt.invocation_started_monotonic is not None
+        invocation = InvocationResult(
+            attempt.invocation_number,
+            status,
+            attempt.invocation_started_at,
+            ended_at,
+            timedelta(
+                seconds=max(
+                    0.0, time.monotonic() - attempt.invocation_started_monotonic
+                )
+            ),
+            failure=failure,
+            retry_delay_seconds=retry_delay,
+            cooldown_seconds=cooldown,
         )
+        attempt.invocations += (invocation,)
+        self._emit(
+            EventKind.INVOCATION_FINISHED,
+            attempt=attempt.reference,
+            status=status,
+            failure=failure,
+            invocation_number=attempt.invocation_number,
+            retry_delay_seconds=retry_delay,
+            cooldown_seconds=cooldown,
+        )
+
+    def _finish_blocked(self, task: _TaskState, attempt: _AttemptState) -> None:
         blockers = self._blockers(task, attempt)
         now = _utc_now()
         started = task.started_at or now
@@ -630,3 +958,9 @@ class _Executor:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _failure_info(error: Exception) -> FailureInfo:
+    return FailureInfo(
+        type(error).__name__, str(error), "".join(traceback.format_exception(error))
+    )

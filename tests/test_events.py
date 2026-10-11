@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError, fields, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -43,6 +43,9 @@ def test_event_signature_defaults_and_immutability() -> None:
         "reason",
         "blocked_by",
         "failure",
+        "invocation_number",
+        "retry_delay_seconds",
+        "cooldown_seconds",
     ]
     assert ExecutionEvent.__dataclass_fields__["task"].default is None
     assert ExecutionEvent.__dataclass_fields__["blocked_by"].default == ()
@@ -60,6 +63,8 @@ def test_event_kind_values_and_consumer_protocol_shape() -> None:
         "attempt_finished",
         "task_finished",
         "flow_finished",
+        "invocation_started",
+        "invocation_finished",
     }
     assert "on_event" in ExecutionEventConsumer.__dict__
 
@@ -158,7 +163,7 @@ def test_event_record_is_fixed_and_lossy() -> None:
         failure=FAILURE,
     )
 
-    assert value.to_record() == {
+    legacy = {
         "run_id": "run-1",
         "sequence": 4,
         "occurred_at": "2026-07-19T12:00:00+00:00",
@@ -174,9 +179,177 @@ def test_event_record_is_fixed_and_lossy() -> None:
             "traceback": "traceback",
         },
     }
-    assert "partition_key" not in str(value.to_record())
+    assert value.to_record(schema_version=1) == legacy
+    current = value.to_record()
+    assert current == {
+        **legacy,
+        "schema_version": 2,
+        "invocation_number": None,
+        "retry_delay_seconds": None,
+        "cooldown_seconds": None,
+    }
+    assert "partition_key" not in str(current)
     assert not hasattr(value, "output")
     assert not hasattr(value, "exception")
+
+
+def test_invocation_event_payloads_and_versioned_records() -> None:
+    started = event(
+        1,
+        EventKind.INVOCATION_STARTED,
+        attempt=ATTEMPT,
+        status=AttemptStatus.RUNNING,
+        invocation_number=1,
+    )
+    finished = event(
+        2,
+        EventKind.INVOCATION_FINISHED,
+        attempt=ATTEMPT,
+        status=AttemptStatus.FAILED,
+        invocation_number=1,
+        failure=FAILURE,
+        retry_delay_seconds=0.25,
+        cooldown_seconds=1.5,
+    )
+
+    assert started.to_record()["invocation_number"] == 1
+    assert finished.to_record()["schema_version"] == 2
+    assert finished.to_record()["retry_delay_seconds"] == 0.25
+    with pytest.raises(ValueError, match="cannot be projected"):
+        started.to_record(schema_version=1)
+    with pytest.raises(ValueError, match="positive integer"):
+        event(
+            1,
+            EventKind.INVOCATION_STARTED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.RUNNING,
+            invocation_number=True,
+        )
+    with pytest.raises(ValueError, match="finite non-negative"):
+        event(
+            1,
+            EventKind.INVOCATION_FINISHED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.FAILED,
+            invocation_number=1,
+            failure=FAILURE,
+            retry_delay_seconds=float("nan"),
+        )
+
+
+def test_invocation_event_stream_requires_contiguous_retry_causality() -> None:
+    events = (
+        event(1, EventKind.FLOW_STARTED, status=FlowStatus.RUNNING),
+        event(2, EventKind.TASK_STARTED, task=TASK, status=AttemptStatus.RUNNING),
+        event(
+            3, EventKind.ATTEMPT_STARTED, attempt=ATTEMPT, status=AttemptStatus.RUNNING
+        ),
+        event(
+            4,
+            EventKind.INVOCATION_STARTED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.RUNNING,
+            invocation_number=1,
+        ),
+        event(
+            5,
+            EventKind.INVOCATION_FINISHED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.FAILED,
+            invocation_number=1,
+            failure=FAILURE,
+            retry_delay_seconds=0,
+        ),
+        event(
+            6,
+            EventKind.INVOCATION_STARTED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.RUNNING,
+            invocation_number=2,
+        ),
+        event(
+            7,
+            EventKind.INVOCATION_FINISHED,
+            attempt=ATTEMPT,
+            status=AttemptStatus.SUCCESS,
+            invocation_number=2,
+        ),
+        event(
+            8, EventKind.ATTEMPT_FINISHED, attempt=ATTEMPT, status=AttemptStatus.SUCCESS
+        ),
+        event(9, EventKind.TASK_FINISHED, task=TASK, status=AttemptStatus.SUCCESS),
+        event(10, EventKind.FLOW_FINISHED, status=FlowStatus.SUCCESS),
+    )
+    validate_event_sequence(events)
+
+    skipped_number = events[:5] + (
+        replace(events[5], invocation_number=3),
+        *events[6:],
+    )
+    with pytest.raises(ValueError, match="contiguous"):
+        validate_event_sequence(skipped_number)
+
+
+def test_logical_finish_must_match_invocation_and_consume_retry() -> None:
+    def stream(
+        invocation_status: AttemptStatus,
+        logical_status: AttemptStatus,
+        retry_delay_seconds: float | None = None,
+    ) -> tuple[ExecutionEvent, ...]:
+        failure = FAILURE if invocation_status is AttemptStatus.FAILED else None
+        logical_failure = FAILURE if logical_status is AttemptStatus.FAILED else None
+        flow_status = (
+            FlowStatus.SUCCESS
+            if logical_status is AttemptStatus.SUCCESS
+            else FlowStatus.CANCELLED
+            if logical_status is AttemptStatus.CANCELLED
+            else FlowStatus.FAILED
+        )
+        return (
+            event(1, EventKind.FLOW_STARTED, status=FlowStatus.RUNNING),
+            event(2, EventKind.TASK_STARTED, task=TASK, status=AttemptStatus.RUNNING),
+            event(
+                3,
+                EventKind.ATTEMPT_STARTED,
+                attempt=ATTEMPT,
+                status=AttemptStatus.RUNNING,
+            ),
+            event(
+                4,
+                EventKind.INVOCATION_STARTED,
+                attempt=ATTEMPT,
+                status=AttemptStatus.RUNNING,
+                invocation_number=1,
+            ),
+            event(
+                5,
+                EventKind.INVOCATION_FINISHED,
+                attempt=ATTEMPT,
+                status=invocation_status,
+                invocation_number=1,
+                failure=failure,
+                retry_delay_seconds=retry_delay_seconds,
+            ),
+            event(
+                6,
+                EventKind.ATTEMPT_FINISHED,
+                attempt=ATTEMPT,
+                status=logical_status,
+                failure=logical_failure,
+            ),
+            event(7, EventKind.TASK_FINISHED, task=TASK, status=logical_status),
+            event(8, EventKind.FLOW_FINISHED, status=flow_status),
+        )
+
+    with pytest.raises(ValueError, match="last invocation status"):
+        validate_event_sequence(stream(AttemptStatus.FAILED, AttemptStatus.SUCCESS))
+    with pytest.raises(ValueError, match="last invocation status"):
+        validate_event_sequence(stream(AttemptStatus.SUCCESS, AttemptStatus.FAILED))
+    with pytest.raises(ValueError, match="scheduled retry"):
+        validate_event_sequence(stream(AttemptStatus.FAILED, AttemptStatus.FAILED, 0.2))
+
+    # Cancellation while waiting may preserve a scheduled retry without inventing it.
+    validate_event_sequence(stream(AttemptStatus.FAILED, AttemptStatus.CANCELLED, 0.2))
 
 
 def test_validate_event_sequence_accepts_complete_causal_stream() -> None:

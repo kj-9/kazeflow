@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -69,6 +70,28 @@ def _validate_blocked_by(blocked_by: tuple[AttemptReference, ...]) -> None:
         raise ValueError("blocked_by must be a tuple of AttemptReference values")
 
 
+def _validate_record_version(schema_version: int) -> None:
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in (1, 2)
+    ):
+        raise ValueError("schema_version must be 1 or 2")
+
+
+def _validate_optional_seconds(value: float | None, field_name: str) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be finite non-negative seconds or None")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite or value < 0:
+        raise ValueError(f"{field_name} must be finite non-negative seconds or None")
+
+
 @dataclass(frozen=True, slots=True)
 class TaskReference:
     task_name: str
@@ -126,6 +149,57 @@ class FailureInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class InvocationResult:
+    """One numbered body-plus-commit operation within a logical attempt."""
+
+    number: int
+    status: AttemptStatus
+    started_at: datetime
+    ended_at: datetime
+    duration: timedelta
+    failure: FailureInfo | None = None
+    retry_delay_seconds: float | None = None
+    cooldown_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.number, bool)
+            or not isinstance(self.number, int)
+            or self.number < 1
+        ):
+            raise ValueError("number must be a positive integer")
+        if not isinstance(self.status, AttemptStatus) or self.status not in (
+            AttemptStatus.SUCCESS,
+            AttemptStatus.FAILED,
+        ):
+            raise ValueError("invocation status must be success or failed")
+        _validate_completed_timing(self.started_at, self.ended_at, self.duration)
+        _validate_optional_seconds(self.retry_delay_seconds, "retry_delay_seconds")
+        _validate_optional_seconds(self.cooldown_seconds, "cooldown_seconds")
+        if self.status is AttemptStatus.FAILED:
+            if not isinstance(self.failure, FailureInfo):
+                raise ValueError("a failed invocation requires FailureInfo")
+        elif self.failure is not None:
+            raise ValueError("a successful invocation cannot carry failure")
+        if self.status is AttemptStatus.SUCCESS and (
+            self.retry_delay_seconds is not None or self.cooldown_seconds is not None
+        ):
+            raise ValueError("retry delays are only valid for failed invocations")
+
+    def to_record(self) -> dict[str, object]:
+        return {
+            "number": self.number,
+            "status": self.status.value,
+            "started_at": self.started_at.isoformat(),
+            "ended_at": self.ended_at.isoformat(),
+            "duration_seconds": self.duration.total_seconds(),
+            "failure": None if self.failure is None else self.failure.to_record(),
+            "retry_delay_seconds": self.retry_delay_seconds,
+            "cooldown_seconds": self.cooldown_seconds,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AttemptResult:
     attempt: AttemptReference
     status: AttemptStatus
@@ -137,6 +211,9 @@ class AttemptResult:
     failure: FailureInfo | None = None
     reason: SkipReason | None = None
     blocked_by: tuple[AttemptReference, ...] = ()
+    resolution: str | None = None
+    materialization_id: str | None = None
+    invocations: tuple[InvocationResult, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.attempt, AttemptReference):
@@ -148,6 +225,48 @@ class AttemptResult:
             raise ValueError("status must be a terminal AttemptStatus")
         _validate_completed_timing(self.started_at, self.ended_at, self.duration)
         _validate_blocked_by(self.blocked_by)
+        if not isinstance(self.invocations, tuple) or not all(
+            isinstance(invocation, InvocationResult) for invocation in self.invocations
+        ):
+            raise ValueError("invocations must be a tuple of InvocationResult values")
+        for index, invocation in enumerate(self.invocations, start=1):
+            if invocation.number != index:
+                raise ValueError("invocation numbers must be contiguous and one-based")
+            if index < len(self.invocations):
+                if invocation.status is not AttemptStatus.FAILED:
+                    raise ValueError("only failed invocations may precede another")
+                if invocation.retry_delay_seconds is None:
+                    raise ValueError("a retried invocation requires a retry delay")
+        if self.invocations and self.status in {
+            AttemptStatus.SUCCESS,
+            AttemptStatus.FAILED,
+        }:
+            last_invocation = self.invocations[-1]
+            if last_invocation.status is not self.status:
+                raise ValueError(
+                    "the last invocation status must match the logical attempt status"
+                )
+            if last_invocation.retry_delay_seconds is not None:
+                raise ValueError(
+                    "a scheduled retry cannot terminate a successful or failed attempt"
+                )
+
+        if self.status is AttemptStatus.SUCCESS:
+            if self.resolution not in (None, "executed", "materialized"):
+                raise ValueError("resolution must be executed, materialized, or None")
+            if self.materialization_id is not None and (
+                not isinstance(self.materialization_id, str)
+                or not self.materialization_id
+            ):
+                raise ValueError("materialization_id must be a non-empty string")
+            if self.resolution == "materialized" and self.materialization_id is None:
+                raise ValueError("a materialized attempt requires a materialization_id")
+            if self.resolution is None and self.materialization_id is not None:
+                raise ValueError("materialization_id requires materialized resolution")
+        elif self.resolution is not None or self.materialization_id is not None:
+            raise ValueError(
+                "only a successful attempt may have materialization resolution data"
+            )
 
         if self.status is AttemptStatus.FAILED:
             if not isinstance(self.failure, FailureInfo):
@@ -163,8 +282,9 @@ class AttemptResult:
         elif self.reason is not None or self.blocked_by:
             raise ValueError("only a skipped attempt may have a reason or blockers")
 
-    def to_record(self) -> dict[str, object]:
-        return {
+    def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
+        _validate_record_version(schema_version)
+        record: dict[str, object] = {
             "attempt": self.attempt.to_record(),
             "status": self.status.value,
             "started_at": self.started_at.isoformat(),
@@ -174,6 +294,11 @@ class AttemptResult:
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
             "failure": None if self.failure is None else self.failure.to_record(),
         }
+        if schema_version == 2:
+            record["invocations"] = [
+                invocation.to_record() for invocation in self.invocations
+            ]
+        return record
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,7 +404,8 @@ class TaskResult:
                 "a mixed or non-skipped partitioned aggregate has no reason or blockers"
             )
 
-    def to_record(self) -> dict[str, object]:
+    def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
+        _validate_record_version(schema_version)
         return {
             "task": self.task.to_record(),
             "is_partitioned": self.is_partitioned,
@@ -289,7 +415,10 @@ class TaskResult:
             "duration_seconds": self.duration.total_seconds(),
             "reason": None if self.reason is None else self.reason.value,
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
-            "attempts": [attempt.to_record() for attempt in self.attempts],
+            "attempts": [
+                attempt.to_record(schema_version=schema_version)
+                for attempt in self.attempts
+            ],
         }
 
 
@@ -331,12 +460,15 @@ class RunResult:
         if self.status is not expected_status:
             raise ValueError("run status must match its task outcomes")
 
-    def to_record(self) -> dict[str, object]:
+    def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
+        _validate_record_version(schema_version)
         return {
             "run_id": self.run_id,
             "status": self.status.value,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat(),
             "duration_seconds": self.duration.total_seconds(),
-            "tasks": [task.to_record() for task in self.tasks],
+            "tasks": [
+                task.to_record(schema_version=schema_version) for task in self.tasks
+            ],
         }

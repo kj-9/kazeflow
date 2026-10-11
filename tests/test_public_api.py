@@ -2,8 +2,14 @@ import kazeflow
 from kazeflow.assets import default_registry
 from kazeflow.events import EventKind, ExecutionEvent, ExecutionEventConsumer
 from kazeflow.flow import Flow
+from kazeflow.materialization import (
+    Materialization,
+    MaterializationContext,
+    MaterializationRecord,
+)
 from kazeflow.plan import FlowPlan
-from kazeflow.results import RunResult
+from kazeflow.results import InvocationResult, RunResult
+from kazeflow.resources import Fail, FailureAction, RateLimit, Retry
 
 
 def test_root_exports_the_core_workflow_and_event_boundary() -> None:
@@ -14,17 +20,35 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
         "EventKind",
         "ExecutionEvent",
         "ExecutionEventConsumer",
+        "Fail",
+        "FailureAction",
         "Flow",
         "FlowPlan",
+        "InvocationResult",
+        "Materialization",
+        "MaterializationContext",
+        "MaterializationRecord",
         "PartitionDef",
+        "RateLimit",
         "RunConfig",
         "RunResult",
+        "ResourcePolicy",
+        "Retry",
         "run",
     ]
     assert kazeflow.Flow is Flow
     assert kazeflow.FlowPlan is FlowPlan
     assert kazeflow.PartitionDef.__name__ == "PartitionDef"
     assert kazeflow.RunResult is RunResult
+    assert kazeflow.InvocationResult is InvocationResult
+    assert kazeflow.RateLimit is RateLimit
+    assert kazeflow.Fail is Fail
+    assert kazeflow.Retry is Retry
+    assert kazeflow.FailureAction == FailureAction
+    assert kazeflow.ResourcePolicy.__name__ == "ResourcePolicy"
+    assert kazeflow.Materialization is Materialization
+    assert kazeflow.MaterializationContext is MaterializationContext
+    assert kazeflow.MaterializationRecord is MaterializationRecord
     assert kazeflow.EventKind is EventKind
     assert kazeflow.ExecutionEvent is ExecutionEvent
     assert kazeflow.ExecutionEventConsumer is ExecutionEventConsumer

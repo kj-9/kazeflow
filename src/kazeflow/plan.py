@@ -5,9 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 import heapq
 from typing import Any, Hashable, Optional, Sequence
+from collections.abc import Mapping
 
 from .assets import AssetRegistry, default_registry
 from .partition import PartitionDef
+from .resources import RateLimit, ResourcePolicy
+
+
+@dataclass(frozen=True)
+class ResourcePlan:
+    """Immutable selected resource policy in a flow plan."""
+
+    name: str
+    max_concurrency: int
+    rate_limit: RateLimit | None = None
+    max_attempts: int = 1
+    classifier_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -49,6 +62,8 @@ class TaskPlan:
     dependencies: tuple[str, ...]
     partition_keys: Optional[tuple[Hashable, ...]]
     partition_domain: Optional[str] = None
+    resource_name: Optional[str] = None
+    materialization_enabled: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dependencies", tuple(self.dependencies))
@@ -63,10 +78,12 @@ class FlowPlan:
     targets: tuple[str, ...]
     tasks: tuple[TaskPlan, ...]
     config: PlanConfig
+    resources: tuple[ResourcePlan, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "targets", tuple(self.targets))
         object.__setattr__(self, "tasks", tuple(self.tasks))
+        object.__setattr__(self, "resources", tuple(self.resources))
 
 
 def build_flow_plan(
@@ -74,12 +91,29 @@ def build_flow_plan(
     *,
     config: Optional[PlanConfig] = None,
     registry: AssetRegistry = default_registry,
+    resources: Mapping[str, ResourcePolicy] | None = None,
 ) -> FlowPlan:
     """Build a validated, dependency-first plan without executing assets."""
 
     normalized_targets = _validate_targets(targets)
     normalized_config = _validate_config(config)
     dependencies_by_name = _collect_closure(normalized_targets, registry)
+    policies = _validate_resources(resources)
+    selected_resources: set[str] = set()
+    resource_names: dict[str, str | None] = {}
+    for name in dependencies_by_name:
+        resource_name = registry.get(name).resource
+        resource_names[name] = resource_name
+        if resource_name is not None:
+            if not isinstance(resource_name, str) or not resource_name:
+                raise ValueError(
+                    f"resource for asset '{name}' must be a non-empty string"
+                )
+            if resource_name not in policies:
+                raise ValueError(
+                    f"asset '{name}' references undeclared resource '{resource_name}'"
+                )
+            selected_resources.add(resource_name)
 
     partition_definitions = tuple(
         (name, registry.get(name).partition_def)
@@ -89,6 +123,7 @@ def build_flow_plan(
     partition_keys, partition_range, partition_domain = _normalize_partition_selection(
         normalized_config, partition_definitions
     )
+    materialization_flags = _validate_materializations(dependencies_by_name, registry)
     normalized_config = PlanConfig(
         max_concurrency=normalized_config.max_concurrency,
         partition_keys=partition_keys,
@@ -109,6 +144,8 @@ def build_flow_plan(
                 if registry.get(name).partition_def is not None
                 else None
             ),
+            resource_name=resource_names[name],
+            materialization_enabled=materialization_flags[name],
         )
         for name in ordered_names
     )
@@ -116,7 +153,105 @@ def build_flow_plan(
         targets=normalized_targets,
         tasks=task_plans,
         config=normalized_config,
+        resources=tuple(
+            ResourcePlan(
+                name,
+                policies[name].max_concurrency,
+                policies[name].rate_limit,
+                policies[name].max_attempts,
+                policies[name].classify_failure is not None,
+            )
+            for name in sorted(selected_resources)
+        ),
     )
+
+
+def _validate_materializations(
+    dependencies_by_name: dict[str, tuple[str, ...]], registry: AssetRegistry
+) -> dict[str, bool]:
+    """Validate opt-in adapter declarations without contacting their storage."""
+    assets = {name: registry.get(name) for name in dependencies_by_name}
+    enabled: dict[str, bool] = {}
+
+    for name, asset in assets.items():
+        adapter = asset.materialization
+        version = asset.version
+        if adapter is None and version is None:
+            enabled[name] = False
+            continue
+        if adapter is None or not isinstance(version, str) or not version.strip():
+            raise ValueError(
+                f"asset '{name}' must declare both a materialization adapter and "
+                "a non-empty version"
+            )
+        if asset.partition_def is None:
+            raise ValueError(f"materialized asset '{name}' must be partitioned")
+        for operation in ("resolve", "load", "commit"):
+            if not callable(getattr(adapter, operation, None)):
+                raise ValueError(
+                    f"materialization adapter for asset '{name}' must provide "
+                    f"a callable {operation} operation"
+                )
+
+        asset_domain = asset.partition_def.domain
+        if not isinstance(asset_domain, str) or not asset_domain:
+            raise ValueError(
+                f"partition domain for materialized asset '{name}' must be "
+                "a non-empty string"
+            )
+        for dependency_name in dependencies_by_name[name]:
+            dependency = assets[dependency_name]
+            if (
+                dependency.materialization is None
+                or not isinstance(dependency.version, str)
+                or not dependency.version.strip()
+                or dependency.partition_def is None
+            ):
+                raise ValueError(
+                    f"materialized asset '{name}' depends on '{dependency_name}', "
+                    "which does not provide a partitioned materialization"
+                )
+            if dependency.partition_def.domain != asset_domain:
+                raise ValueError(
+                    f"materialized asset '{name}' depends on '{dependency_name}' "
+                    "in a different partition domain"
+                )
+        enabled[name] = True
+
+    return enabled
+
+
+def _validate_resources(
+    resources: Mapping[str, ResourcePolicy] | None,
+) -> dict[str, ResourcePolicy]:
+    if resources is None:
+        return {}
+    if not isinstance(resources, Mapping):
+        raise TypeError("resources must be a mapping or None")
+    policies: dict[str, ResourcePolicy] = {}
+    for name, policy in resources.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("resource names must be non-empty strings")
+        if not isinstance(policy, ResourcePolicy):
+            raise TypeError(f"resource '{name}' must use ResourcePolicy")
+        # Recheck in case an invalid instance was constructed without its initializer.
+        limit = policy.max_concurrency
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError(
+                f"resource '{name}' max_concurrency must be a positive integer"
+            )
+        if policy.rate_limit is not None:
+            if not isinstance(policy.rate_limit, RateLimit):
+                raise TypeError(f"resource '{name}' rate_limit must use RateLimit")
+            RateLimit(policy.rate_limit.requests, policy.rate_limit.per_seconds)
+        ResourcePolicy(
+            policy.max_concurrency,
+            policy.rate_limit,
+            policy.max_attempts,
+            policy.classify_failure,
+        )
+        policies[name] = policy
+    return policies
 
 
 def _validate_targets(targets: Any) -> tuple[str, ...]:

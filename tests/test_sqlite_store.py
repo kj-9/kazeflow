@@ -16,7 +16,11 @@ from kazeflow.results import (
     TaskReference,
     TaskResult,
 )
-from kazeflow.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteRunStore
+from kazeflow.sqlite_store import (
+    CURRENT_RECORD_SCHEMA_VERSION,
+    CURRENT_SCHEMA_VERSION,
+    SQLiteRunStore,
+)
 
 
 NOW = datetime(2026, 7, 31, 12, 0, tzinfo=timezone.utc)
@@ -157,9 +161,9 @@ def test_save_load_preserves_the_exact_portable_failure_partition_record(
         saved = store.save(result)
         loaded = store.load(result.run_id)
 
-    assert saved.schema_version == CURRENT_SCHEMA_VERSION
-    assert loaded.schema_version == CURRENT_SCHEMA_VERSION
-    assert loaded.record == result.to_record()
+    assert saved.schema_version == CURRENT_RECORD_SCHEMA_VERSION
+    assert loaded.schema_version == CURRENT_RECORD_SCHEMA_VERSION
+    assert loaded.record == result.to_record(schema_version=2)
     tasks = _tasks(loaded.record)
     assert [cast(dict[str, object], task["task"])["task_name"] for task in tasks] == [
         "source",
@@ -189,7 +193,7 @@ def test_loaded_record_decodes_a_fresh_independent_dictionary(tmp_path) -> None:
         first = loaded.record
         _attempts(_tasks(first)[0])[0]["status"] = "tampered"
 
-        assert loaded.record == result.to_record()
+        assert loaded.record == result.to_record(schema_version=2)
 
 
 @pytest.mark.parametrize(
@@ -300,14 +304,15 @@ def test_save_load_list_and_reopen_cover_terminal_record_kinds(tmp_path) -> None
             "success",
         ]
         assert all(
-            summary.schema_version == CURRENT_SCHEMA_VERSION for summary in summaries
+            summary.schema_version == CURRENT_RECORD_SCHEMA_VERSION
+            for summary in summaries
         )
         assert store.list_runs(limit=2) == summaries[:2]
 
     with SQLiteRunStore(path) as reopened:
-        assert reopened.load("alpha").record == results[0].to_record()
-        assert reopened.load("beta").record == results[1].to_record()
-        assert reopened.load("gamma").record == results[2].to_record()
+        assert reopened.load("alpha").record == results[0].to_record(schema_version=2)
+        assert reopened.load("beta").record == results[1].to_record(schema_version=2)
+        assert reopened.load("gamma").record == results[2].to_record(schema_version=2)
 
 
 def test_duplicate_saves_and_missing_loads_do_not_modify_history(tmp_path) -> None:
@@ -329,10 +334,10 @@ def test_invalid_runresult_projection_does_not_persist_or_block_retry(
     valid = _unpartitioned_result("retry-after-invalid-projection")
 
     class InvalidProjection(RunResult):
-        def to_record(self) -> dict[str, object]:
+        def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
             if invalid_record == "empty":
                 return {}
-            record = super().to_record()
+            record = super().to_record(schema_version=schema_version)
             record["run_id"] = "different-run-id"
             record["status"] = "failed"
             return record
@@ -352,8 +357,8 @@ def test_invalid_runresult_projection_does_not_persist_or_block_retry(
         assert store.list_runs() == ()
 
         saved = store.save(valid)
-        assert saved.record == valid.to_record()
-        assert store.load(valid.run_id).record == valid.to_record()
+        assert saved.record == valid.to_record(schema_version=2)
+        assert store.load(valid.run_id).record == valid.to_record(schema_version=2)
 
 
 def test_constructor_rejects_invalid_paths_before_creating_a_database(
@@ -395,7 +400,54 @@ def test_portable_records_keep_partition_presence_without_raw_values(
     assert cast(dict[str, object], attempt["attempt"])["partition"] == {"present": True}
     assert "partition_key" not in loaded.record_json
     assert "opaque-value-must-not-persist" not in loaded.record_json
-    assert loaded.record == result.to_record()
+    assert loaded.record == result.to_record(schema_version=2)
+
+
+def test_database_schema_one_reads_mixed_portable_record_versions_without_rewrite(
+    tmp_path,
+) -> None:
+    path = tmp_path / "mixed-record-versions.sqlite3"
+    legacy_result = _unpartitioned_result("legacy-v1")
+    legacy_json = json.dumps(
+        legacy_result.to_record(),
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    current_result = _unpartitioned_result("current-v2")
+
+    with SQLiteRunStore(path) as store:
+        store.save(current_result)
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                """
+                INSERT INTO runs (run_id, schema_version, status, saved_at, record_json)
+                VALUES (?, 1, ?, ?, ?)
+                """,
+                (
+                    legacy_result.run_id,
+                    legacy_result.status.value,
+                    NOW.isoformat(),
+                    legacy_json,
+                ),
+            )
+        assert store.schema_version == 1
+        legacy = store.load(legacy_result.run_id)
+        current = store.load(current_result.run_id)
+        assert legacy.schema_version == 1
+        assert legacy.record == legacy_result.to_record()
+        assert current.schema_version == 2
+        assert current.record == current_result.to_record(schema_version=2)
+        assert {entry.schema_version for entry in store.list_runs()} == {1, 2}
+
+    with sqlite3.connect(path) as connection:
+        unchanged = connection.execute(
+            "SELECT record_json FROM runs WHERE run_id = ?",
+            (legacy_result.run_id,),
+        ).fetchone()[0]
+    assert unchanged == legacy_json
+    assert CURRENT_SCHEMA_VERSION == 1
 
 
 def test_nonserializable_outputs_and_exceptions_do_not_prevent_persistence(

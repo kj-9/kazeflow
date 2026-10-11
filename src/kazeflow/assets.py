@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol, Union
 
+from .materialization import Materialization
 from .partition import PartitionDef, PartitionKey
 
 
@@ -20,6 +21,7 @@ class AssetContext:
     asset_name: str
     logger: logging.Logger
     partition_key: Optional[PartitionKey]
+    invocation_number: int = 1
 
 
 @dataclass
@@ -43,10 +45,16 @@ class Asset:
         func: NamedCallable,
         deps: list[str],
         partition_def: Optional[PartitionDef] = None,
+        resource: Optional[str] = None,
+        materialization: Optional[Materialization] = None,
+        version: Optional[str] = None,
     ):
         self.func = func
         self.deps = deps
         self.partition_def = partition_def
+        self.resource = resource
+        self.materialization = materialization
+        self.version = version
         self.name = func.__name__
 
     async def invoke(self, context: AssetContext, inputs: dict[str, Any]) -> Any:
@@ -83,6 +91,9 @@ class AssetRegistry:
         func: NamedCallable,
         deps: Optional[list[str]] = None,
         partition_def: Optional[PartitionDef] = None,
+        resource: Optional[str] = None,
+        materialization: Optional[Materialization] = None,
+        version: Optional[str] = None,
     ):
         """Registers an asset."""
         resolved_deps = set(deps or [])
@@ -99,6 +110,9 @@ class AssetRegistry:
             func=func,
             deps=list(resolved_deps),
             partition_def=partition_def,
+            resource=resource,
+            materialization=materialization,
+            version=version,
         )
         self._assets[func.__name__] = asset_obj
 
@@ -143,13 +157,23 @@ def asset(
     *,
     deps: Optional[list[str]] = None,
     partition_def: Optional[PartitionDef] = None,
+    resource: Optional[str] = None,
+    materialization: Optional[Materialization] = None,
+    version: Optional[str] = None,
 ) -> Union[Callable[[NamedCallable], NamedCallable], NamedCallable]:
     """
     A decorator to define an asset, its dependencies, and its configuration schema.
     """
 
     def decorator(func: NamedCallable) -> NamedCallable:
-        default_registry.register(func, deps=deps, partition_def=partition_def)
+        default_registry.register(
+            func,
+            deps=deps,
+            partition_def=partition_def,
+            resource=resource,
+            materialization=materialization,
+            version=version,
+        )
         return func
 
     if _func is None:

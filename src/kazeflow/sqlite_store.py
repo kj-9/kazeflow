@@ -18,6 +18,7 @@ from .results import FlowStatus, RunResult
 
 
 CURRENT_SCHEMA_VERSION = 1
+CURRENT_RECORD_SCHEMA_VERSION = 2
 _TERMINAL_FLOW_STATUSES = frozenset(
     {FlowStatus.SUCCESS.value, FlowStatus.FAILED.value, FlowStatus.CANCELLED.value}
 )
@@ -44,9 +45,9 @@ class StoredRunSummary:
         if (
             isinstance(self.schema_version, bool)
             or not isinstance(self.schema_version, int)
-            or self.schema_version <= 0
+            or self.schema_version not in (1, CURRENT_RECORD_SCHEMA_VERSION)
         ):
-            raise ValueError("schema_version must be a positive integer")
+            raise ValueError("schema_version must be a supported record version")
         if (
             not isinstance(self.status, str)
             or self.status not in _TERMINAL_FLOW_STATUSES
@@ -63,12 +64,16 @@ class StoredRunRecord(StoredRunSummary):
 
     def __post_init__(self) -> None:
         StoredRunSummary.__post_init__(self)
-        _decode_portable_run_record(self.record_json, self.run_id, self.status)
+        _decode_portable_run_record(
+            self.record_json, self.run_id, self.status, self.schema_version
+        )
 
     @property
     def record(self) -> dict[str, object]:
         """Return a new decoded copy of the portable, deliberately lossy record."""
-        return _decode_portable_run_record(self.record_json, self.run_id, self.status)
+        return _decode_portable_run_record(
+            self.record_json, self.run_id, self.status, self.schema_version
+        )
 
 
 class SQLiteRunStore:
@@ -114,7 +119,7 @@ class SQLiteRunStore:
         if not isinstance(result, RunResult):
             raise TypeError("result must be a RunResult")
 
-        record = result.to_record()
+        record = result.to_record(schema_version=CURRENT_RECORD_SCHEMA_VERSION)
         record_json = json.dumps(
             record,
             allow_nan=False,
@@ -125,7 +130,7 @@ class SQLiteRunStore:
         saved_at = datetime.now(timezone.utc)
         stored = StoredRunRecord(
             run_id=result.run_id,
-            schema_version=CURRENT_SCHEMA_VERSION,
+            schema_version=CURRENT_RECORD_SCHEMA_VERSION,
             status=result.status.value,
             saved_at=saved_at,
             record_json=record_json,
@@ -340,8 +345,14 @@ def _validate_utc_timestamp(value: object, field_name: str) -> None:
 
 
 def _decode_portable_run_record(
-    record_json: str, run_id: str, status: str
+    record_json: str, run_id: str, status: str, schema_version: int
 ) -> dict[str, object]:
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in (1, CURRENT_RECORD_SCHEMA_VERSION)
+    ):
+        raise ValueError("stored run record has an unsupported record version")
     if not isinstance(record_json, str):
         raise ValueError("record_json must be a JSON object string")
     try:
@@ -354,7 +365,44 @@ def _decode_portable_run_record(
         raise ValueError("stored run record does not match its envelope")
     if not isinstance(decoded["tasks"], list):
         raise ValueError("stored run record tasks must be a list")
+    if schema_version == 1 and _record_contains_invocations(decoded):
+        raise ValueError("version 1 run records cannot contain invocation history")
+    if schema_version == 2 and not _record_contains_v2_attempt_shapes(decoded):
+        raise ValueError("version 2 run records must include invocation arrays")
     return decoded
+
+
+def _record_contains_invocations(record: dict[str, object]) -> bool:
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task_value in tasks:
+        if not isinstance(task_value, dict):
+            continue
+        attempts = task_value.get("attempts")
+        if isinstance(attempts, list) and any(
+            isinstance(attempt, dict) and "invocations" in attempt
+            for attempt in attempts
+        ):
+            return True
+    return False
+
+
+def _record_contains_v2_attempt_shapes(record: dict[str, object]) -> bool:
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task_value in tasks:
+        if not isinstance(task_value, dict):
+            return False
+        attempts = task_value.get("attempts")
+        if not isinstance(attempts, list):
+            return False
+        if any(
+            not isinstance(attempt, dict)
+            or not isinstance(attempt.get("invocations"), list)
+            for attempt in attempts
+        ):
+            return False
+    return True
 
 
 def _first_sql_keyword(statement: str) -> str:
