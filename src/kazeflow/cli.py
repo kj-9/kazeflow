@@ -32,7 +32,9 @@ EXIT_ENTRY = 3
 EXIT_INFRASTRUCTURE = 4
 _DEFAULT_HISTORY_STORE = Path(".kazeflow") / "runs.sqlite3"
 _CLI_DOCUMENT_SCHEMA_VERSION = 1
-_PORTABLE_RECORD_SCHEMA_VERSION = 1
+_PLAN_DOCUMENT_SCHEMA_VERSION = 4
+_PORTABLE_RECORD_SCHEMA_VERSION = 2
+_HISTORY_DOCUMENT_SCHEMA_VERSION = 2
 
 
 class _UsageError(Exception):
@@ -518,7 +520,9 @@ def _emit_result(
             "kazeflow.run-result",
             {
                 "record_schema_version": _PORTABLE_RECORD_SCHEMA_VERSION,
-                "record": result.to_record(),
+                "record": result.to_record(
+                    schema_version=_PORTABLE_RECORD_SCHEMA_VERSION
+                ),
             },
         )
         return
@@ -883,6 +887,23 @@ def _task_selection_record(task: Any, *, selection_kind: str) -> dict[str, Any]:
 def _plan_record(plan: FlowPlan) -> dict[str, Any]:
     return {
         "targets": list(plan.targets),
+        "resources": [
+            {
+                "name": resource.name,
+                "max_concurrency": resource.max_concurrency,
+                "rate_limit": (
+                    {
+                        "requests": resource.rate_limit.requests,
+                        "per_seconds": resource.rate_limit.per_seconds,
+                    }
+                    if resource.rate_limit is not None
+                    else None
+                ),
+                "max_attempts": resource.max_attempts,
+                "classifier_enabled": resource.classifier_enabled,
+            }
+            for resource in plan.resources
+        ],
         "config": {
             "max_concurrency": plan.config.max_concurrency,
             "partition_selection": _plan_selection_record(plan),
@@ -891,6 +912,7 @@ def _plan_record(plan: FlowPlan) -> dict[str, Any]:
             {
                 "name": task.name,
                 "dependencies": list(task.dependencies),
+                "resource": task.resource_name,
                 "partition_selection": _task_selection_record(
                     task, selection_kind=plan.config.selection_kind
                 ),
@@ -917,6 +939,26 @@ def _text_plan(
         f"{_partition_summary(plan)} · {_concurrency_summary(plan)}",
         file=stream,
     )
+    if plan.resources:
+        print("Resources:", file=stream)
+        for resource in plan.resources:
+            print(
+                f"  {resource.name}: max concurrency {resource.max_concurrency} invocations",
+                file=stream,
+            )
+            if resource.rate_limit is not None:
+                print(
+                    "    rate limit: "
+                    f"{resource.rate_limit.requests} asset body invocation starts per "
+                    f"{resource.rate_limit.per_seconds:g} seconds per run",
+                    file=stream,
+                )
+            print(
+                f"    maximum body invocations: {resource.max_attempts} per logical attempt "
+                f"(including first); "
+                f"failure classifier: {'enabled' if resource.classifier_enabled else 'disabled'}",
+                file=stream,
+            )
     print("Graph:", file=stream)
     for task in plan.tasks:
         label = _text_task_label(
@@ -975,6 +1017,8 @@ def _task_partition_summary(task: Any, *, selection_kind: str) -> str:
 
 def _text_task_label(task: Any, targets: Sequence[str], *, selection_kind: str) -> str:
     suffix = " *" if task.name in targets else ""
+    if task.resource_name is not None:
+        suffix = f" [resource: {task.resource_name}]" + suffix
     selection = _task_selection_record(task, selection_kind=selection_kind)
     partition = ""
     if selection["kind"] != "unpartitioned":
@@ -1034,10 +1078,23 @@ def _json_output(value: dict[str, Any]) -> None:
 
 
 def _emit_json_document(document_type: str, data: dict[str, Any]) -> None:
+    schema_version = (
+        _PLAN_DOCUMENT_SCHEMA_VERSION
+        if document_type == "kazeflow.plan"
+        else _HISTORY_DOCUMENT_SCHEMA_VERSION
+        if document_type
+        in {
+            "kazeflow.run-result",
+            "kazeflow.runs-list",
+            "kazeflow.runs-show",
+            "kazeflow.runs-compare",
+        }
+        else _CLI_DOCUMENT_SCHEMA_VERSION
+    )
     _json_output(
         {
             "document_type": document_type,
-            "schema_version": _CLI_DOCUMENT_SCHEMA_VERSION,
+            "schema_version": schema_version,
             "data": data,
         }
     )

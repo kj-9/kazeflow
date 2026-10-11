@@ -29,9 +29,16 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, str,
 
 def _json_data(stdout: str, document_type: str) -> dict[str, Any]:
     document = json.loads(stdout)
+    versions = {
+        "kazeflow.plan": 4,
+        "kazeflow.run-result": 2,
+        "kazeflow.runs-list": 2,
+        "kazeflow.runs-show": 2,
+        "kazeflow.runs-compare": 2,
+    }
     assert document == {
         "document_type": document_type,
-        "schema_version": 1,
+        "schema_version": versions.get(document_type, 1),
         "data": document["data"],
     }
     return document["data"]
@@ -245,6 +252,7 @@ flow = Flow(['publish'])
         {
             "name": "publish",
             "dependencies": [],
+            "resource": None,
             "partition_selection": {
                 "kind": "keys",
                 "domain": "date",
@@ -322,6 +330,46 @@ flow = Flow(['publish'])
         "  task_1 -> task_2;",
         "}",
     ]
+
+
+def test_plan_text_shows_selected_resources_and_omits_empty_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "resources.py",
+        """
+from kazeflow import Flow, RateLimit, ResourcePolicy, asset
+
+@asset(resource="network")
+def fetch():
+    raise AssertionError("asset body must not run")
+
+@asset(resource="network")
+def publish(fetch):
+    raise AssertionError("asset body must not run")
+
+flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=2, rate_limit=RateLimit(4, 2))})
+""",
+    )
+    status, stdout, stderr = _run(capsys, ["plan", str(entry)])
+
+    assert status == 0
+    assert stderr == ""
+    assert "Resources:\n  network: max concurrency 2 invocations" in stdout
+    assert "rate limit: 4 asset body invocation starts per 2 seconds per run" in stdout
+    assert "  fetch [resource: network]" in stdout
+    assert "fetch --> publish [resource: network] *" in stdout
+
+    no_resource = _script(
+        tmp_path,
+        "plain.py",
+        "from kazeflow import Flow, asset\n@asset\ndef plain(): pass\nflow = Flow(['plain'])\n",
+    )
+    status, stdout, stderr = _run(capsys, ["plan", str(no_resource)])
+    assert status == 0
+    assert stderr == ""
+    assert "Resources:" not in stdout
 
 
 def test_plan_verbose_is_text_only_and_keeps_partition_keys_private(
@@ -636,7 +684,7 @@ def publish():
 
     assert status == 0
     run = _json_data(stdout, "kazeflow.run-result")
-    assert run["record_schema_version"] == 1
+    assert run["record_schema_version"] == 2
     record = run["record"]
     assert record["status"] == "success"
     assert "raw output must not be serialized" not in stdout
@@ -971,7 +1019,7 @@ def publish():
     assert stderr == ""
     history = _json_data(stdout, "kazeflow.runs-list")
     assert history["runs"][0]["run_id"] == run_id
-    assert history["runs"][0]["record_schema_version"] == 1
+    assert history["runs"][0]["record_schema_version"] == 2
     assert history["runs"][0]["status"] == "success"
     assert history["runs"][0]["saved_at"].endswith("+00:00")
 
@@ -1023,7 +1071,7 @@ def publish():
     assert stderr == ""
     shown = _json_data(stdout, "kazeflow.runs-show")
     assert shown["run_id"] == success_id
-    assert shown["record_schema_version"] == 1
+    assert shown["record_schema_version"] == 2
     assert shown["store_schema_version"] == 1
     assert shown["record"]["tasks"][0]["attempts"][0]["attempt"]["partition"] == {
         "present": False

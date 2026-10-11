@@ -18,12 +18,54 @@ from importlib import resources
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import kazeflow
-from kazeflow import Flow, FlowPlan, RunResult
+from kazeflow import (
+    Flow,
+    FlowPlan,
+    Materialization,
+    MaterializationContext,
+    MaterializationRecord,
+    RunResult,
+)
 from kazeflow.results import AttemptStatus, FlowStatus
+from kazeflow.file_materialization import (
+    FileMaterialization,
+    FileMaterializationError,
+    JsonCodec,
+    MaterializationCodec,
+)
 
 side_effects = []
+assert Materialization is not None
+assert MaterializationContext is not None
+assert MaterializationRecord is not None
+assert MaterializationCodec is not None
+assert FileMaterializationError is not None
+
+with tempfile.TemporaryDirectory(prefix="kazeflow-file-materialization-") as temporary:
+    store_root = Path(temporary) / "store"
+    adapter = FileMaterialization(store_root, codec=JsonCodec())
+    assert not store_root.exists()
+    context = MaterializationContext(
+        asset_name="wheel_smoke",
+        version="v1",
+        partition_domain="wheel_smoke",
+        partition_key_present=True,
+        partition_key="key",
+    )
+    committed = adapter.commit(context, {"answer": [42]})
+    assert committed.committed
+    resolved = adapter.resolve(context)
+    assert resolved == committed
+    assert adapter.load(resolved) == {"answer": [42]}
+    try:
+        JsonCodec().encode((42,))
+    except (TypeError, ValueError):
+        pass
+    else:
+        raise AssertionError("JsonCodec must reject tuples")
 
 
 @kazeflow.asset
@@ -48,15 +90,27 @@ assert not any(name == "rich" or name.startswith("rich.") for name in sys.module
 flow_file = Path("smoke_flow.py")
 flow_file.write_text(
     '''
-from kazeflow import asset
+from kazeflow import Fail, Flow, RateLimit, ResourcePolicy, Retry, asset
 
-@asset
+invocations = []
+
+def classify_failure(error):
+    if isinstance(error, TimeoutError):
+        return Retry(after_seconds=0, cooldown_resource=True)
+    return Fail()
+
+@asset(resource="network")
 def source():
+    invocations.append("source")
+    if len(invocations) == 1:
+        raise TimeoutError("transient")
     return "not called"
 
-@asset
+@asset(resource="network")
 def publish(source):
     return "not called"
+
+flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=2, rate_limit=RateLimit(2, 1.5), max_attempts=2, classify_failure=classify_failure)})
 ''',
     encoding="utf-8",
 )
@@ -91,8 +145,21 @@ plan_cli = subprocess.run(
 )
 plan_document = json.loads(plan_cli.stdout)
 assert plan_document["document_type"] == "kazeflow.plan"
-assert plan_document["schema_version"] == 1
+assert plan_document["schema_version"] == 4
 assert plan_document["data"]["targets"] == ["publish"]
+assert plan_document["data"]["resources"] == [
+    {
+        "name": "network",
+        "max_concurrency": 2,
+        "rate_limit": {"requests": 2, "per_seconds": 1.5},
+        "max_attempts": 2,
+        "classifier_enabled": True,
+    }
+]
+assert [task["resource"] for task in plan_document["data"]["tasks"]] == [
+    "network",
+    "network",
+]
 run_cli = subprocess.run(
     [str(command), "run", str(flow_file), "--yes", "--format", "json"],
     check=True,
@@ -101,9 +168,11 @@ run_cli = subprocess.run(
 )
 run_document = json.loads(run_cli.stdout)
 assert run_document["document_type"] == "kazeflow.run-result"
-assert run_document["schema_version"] == 1
-assert run_document["data"]["record_schema_version"] == 1
+assert run_document["schema_version"] == 2
+assert run_document["data"]["record_schema_version"] == 2
 assert run_document["data"]["record"]["status"] == "success"
+source_record = next(task for task in run_document["data"]["record"]["tasks"] if task["task"]["task_name"] == "source")
+assert [item["number"] for item in source_record["attempts"][0]["invocations"]] == [1, 2]
 history_directory = Path(".kazeflow")
 history_directory.mkdir()
 history_store = history_directory / "runs.sqlite3"
@@ -125,7 +194,8 @@ history = subprocess.run(
 history_document = json.loads(history.stdout)
 assert history_document["document_type"] == "kazeflow.runs-show"
 assert history_document["data"]["run_id"] == stored_run_id
-assert history_document["data"]["record_schema_version"] == 1
+assert history_document["schema_version"] == 2
+assert history_document["data"]["record_schema_version"] == 2
 assert history_document["data"]["store_schema_version"] >= 1
 """
 
