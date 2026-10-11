@@ -4,7 +4,7 @@ Use `--format json` when another program consumes kazeflow output. Human-readabl
 text is for review and can change in layout; automation must not parse it. A
 successful JSON command writes exactly one typed document to standard output.
 
-Version note: plan v4 and run/history v3 are unreleased changes on `main`. Use the
+Version note: plan v4 and run/history v4 are unreleased changes on `main`. Use the
 schema matching the installed package, not necessarily the newest source tree.
 
 ## Common envelope
@@ -25,20 +25,20 @@ one your consumer explicitly supports.
 
 | Command outcome | Document type | Schema | Representative document |
 | --- | --- | --- | --- |
-| `assets --format json` | `kazeflow.assets` | [`assets.schema.json`](../schemas/cli/v5/assets.schema.json) | [`assets`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/assets.json) |
-| `partitions --format json` | `kazeflow.partitions` | [`partitions.schema.json`](../schemas/cli/v5/partitions.schema.json) | [`partitions`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/partitions.json) |
-| `plan --format json` | `kazeflow.plan` v4 | [`plan.schema.json`](../schemas/cli/v5/plan.schema.json) | [`key selection`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/plan-keys.json), [`range`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/plan-range.json), [`empty`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/plan-empty.json), [`retry policy`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/plan-retry.json) |
-| completed `run --format json` | `kazeflow.run-result` v3 | [`run-result.schema.json`](../schemas/cli/v5/run-result.schema.json) | [`success`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/run-success.json), [`asset failure`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/run-failed.json), [`circuit open`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/run-circuit-open.json) |
-| declined interactive JSON run | `kazeflow.run-declined` | [`run-declined.schema.json`](../schemas/cli/v5/run-declined.schema.json) | [`declined`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/run-declined.json) |
-| `runs list --format json` | `kazeflow.runs-list` v3 | [`runs-list.schema.json`](../schemas/cli/v5/runs-list.schema.json) | [`runs list`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/runs-list.json) |
-| `runs show --format json` | `kazeflow.runs-show` v3 | [`runs-show.schema.json`](../schemas/cli/v5/runs-show.schema.json) | [`runs show`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/runs-show.json) |
-| `runs compare --format json` | `kazeflow.runs-compare` v3 | [`runs-compare.schema.json`](../schemas/cli/v5/runs-compare.schema.json) | [`runs compare`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v5/runs-compare.json) |
+| `assets --format json` | `kazeflow.assets` | [`assets.schema.json`](../schemas/cli/v6/assets.schema.json) | [`assets`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/assets.json) |
+| `partitions --format json` | `kazeflow.partitions` | [`partitions.schema.json`](../schemas/cli/v6/partitions.schema.json) | [`partitions`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/partitions.json) |
+| `plan --format json` | `kazeflow.plan` v4 | [`plan.schema.json`](../schemas/cli/v6/plan.schema.json) | [`key selection`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/plan-keys.json), [`range`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/plan-range.json), [`empty`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/plan-empty.json), [`retry policy`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/plan-retry.json) |
+| completed `run --format json` | `kazeflow.run-result` v4 | [`run-result.schema.json`](../schemas/cli/v6/run-result.schema.json) | [`success`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/run-success.json), [`asset failure`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/run-failed.json), [`circuit open`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/run-circuit-open.json) |
+| declined interactive JSON run | `kazeflow.run-declined` | [`run-declined.schema.json`](../schemas/cli/v6/run-declined.schema.json) | [`declined`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/run-declined.json) |
+| `runs list --format json` | `kazeflow.runs-list` v4 | [`runs-list.schema.json`](../schemas/cli/v6/runs-list.schema.json) | [`runs list`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/runs-list.json) |
+| `runs show --format json` | `kazeflow.runs-show` v4 | [`runs-show.schema.json`](../schemas/cli/v6/runs-show.schema.json) | [`runs show`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/runs-show.json) |
+| `runs compare --format json` | `kazeflow.runs-compare` v4 | [`runs-compare.schema.json`](../schemas/cli/v6/runs-compare.schema.json) | [`runs compare`](https://github.com/kj-9/kazeflow/blob/main/tests/fixtures/cli-json/v6/runs-compare.json) |
 
 The schemas are normative Draft 2020-12 documents. Assets, partitions, and declined
-run documents remain at version 1. The v1, v2, and v3 plan schemas and goldens, and
-the v4 collection, remain available for historical consumers. The shared v5 schema
-documents current versions: plan v4, run-result and history v3, and other document
-types v1.
+run documents remain at version 1. The v1 through v4 plan schemas and goldens, and
+the v1 through v5 collections, remain available for historical consumers. The shared
+v6 schema collection documents current versions: plan v4, run-result and history
+v4, and other document types v1.
 The checked-in examples are normalized only where values necessarily vary between
 runs, such as run IDs, timestamps, durations, and traceback locations.
 
@@ -59,9 +59,9 @@ separate Python and storage contract:
 ```json
 {
   "document_type": "kazeflow.run-result",
-  "schema_version": 3,
+  "schema_version": 4,
   "data": {
-    "record_schema_version": 3,
+    "record_schema_version": 4,
     "record": {"run_id": "…", "status": "success", "tasks": []}
   }
 }
@@ -77,11 +77,11 @@ the command-oriented field reference.
 | `kazeflow.assets` | `declared_flow` (boolean) and `assets` (ordered asset records). Each asset has `name`, `dependencies`, and `partitioned`. |
 | `kazeflow.partitions` | `targets` and `partitions`. Each partition record has `asset`, `definition_kind`, `domain`, `key_format`, and `supports_range`. |
 | `kazeflow.plan` v4 | `targets`, selected `resources`, `config`, and dependency-first `tasks`. Each resource has `name`, `max_concurrency`, nullable `rate_limit`, `max_attempts`, and `classifier_enabled`; callback code is never projected. |
-| `kazeflow.run-result` v3 | `record_schema_version: 3` and a portable record with invocation history and circuit skip reasons. |
+| `kazeflow.run-result` v4 | `record_schema_version: 4` and a portable record with invocation history, circuit skip reasons, and successful materialization provenance. |
 | `kazeflow.run-declined` | `reason`, currently `not_approved`. It is not a `RunResult`. |
-| `kazeflow.runs-list` v3 | `runs`, with each summary reporting `record_schema_version` (1, 2, or 3), `status`, and `saved_at`. |
-| `kazeflow.runs-show` v3 | `run_id`, per-record `record_schema_version`, `status`, `saved_at`, `store_schema_version`, and a v1, v2, or v3 portable record. |
-| `kazeflow.runs-compare` v3 | `left`, `right`, and `comparison`. Each stored side retains its own record version; comparison has flow deltas and ordered task aggregate comparisons. |
+| `kazeflow.runs-list` v4 | `runs`, with each summary reporting `record_schema_version` (1, 2, 3, or 4), `status`, and `saved_at`. |
+| `kazeflow.runs-show` v4 | `run_id`, per-record `record_schema_version`, `status`, `saved_at`, `store_schema_version`, and a v1, v2, v3, or v4 portable record. |
+| `kazeflow.runs-compare` v4 | `left`, `right`, and `comparison`. Each stored side retains its own record version and full record; comparison has flow deltas and ordered task aggregate comparisons. |
 
 `partition_selection.kind` is one of `omitted`, `keys`, `range`, `empty`, or
 `unpartitioned`; `domain` and `count` are nullable only where that kind has no
@@ -110,12 +110,16 @@ status, start/end timestamps, duration, nullable failure, and nullable retry and
 resource-cooldown seconds. Invocation retries do not create extra logical attempts.
 Failure metadata contains `exception_type`, `message`, and `traceback`.
 
-CLI-produced run records use record v3. `RunResult.to_record()` still defaults to
-v1 for Python callers unless they request `schema_version=2` or `3`. SQLite layout
-remains store schema v1; it can contain record v1, v2, and v3 rows, reported
-independently by each history envelope. Circuit `blocked_by` references retain the
-source task name and partition-presence flag in portable records, but omit raw keys;
-partition identities can therefore be lossy after serialization.
+CLI-produced run records use record v4. `RunResult.to_record()` still defaults to
+v1 for Python callers unless they request `schema_version=2`, `3`, or `4`. V4 adds
+nullable `resolution` and `materialization_id` fields to every attempt. Successful
+ordinary work reports `executed` with no ID, committed work reports `executed` with
+its committed ID, and reused work reports `materialized` with its ID. Non-successful
+attempts have null values. SQLite layout remains store schema v1; it can contain
+record v1 through v4 rows, reported independently by each history envelope. Circuit
+`blocked_by` references retain the source task name and partition-presence flag in
+portable records, but omit raw keys; partition identities can therefore be lossy
+after serialization.
 
 `comparison` contains `status_changed`, `duration_seconds_delta`,
 `task_count_delta`, and ordered `tasks`. Each task comparison has `task_name`,
@@ -150,9 +154,12 @@ loading and asset execution still run trusted Python. User output redirected to
 stderr can contain sensitive values.
 
 Portable documents structurally omit arbitrary task outputs, raw exception objects,
-and dedicated raw partition-key fields. They do **not** redact application-controlled
-failure metadata: an exception message or traceback can repeat a partition key,
-credential fragment, or other sensitive value. See the [trust boundary](../concepts/trust-boundary.md).
+and dedicated raw partition-key fields. Materialization IDs are opaque,
+adapter-defined diagnostic strings; they can contain application information and
+are not automatically redacted. Inspection does not resolve IDs or load artifacts.
+Documents also do **not** redact application-controlled failure metadata: an
+exception message or traceback can repeat a partition key, credential fragment, or
+other sensitive value. See the [trust boundary](../concepts/trust-boundary.md).
 
 ## Exit and document matrix
 

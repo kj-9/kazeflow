@@ -17,8 +17,10 @@ from kazeflow.cli import main
 
 
 _ROOT = Path(__file__).parents[1]
-_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v5/schema.json"
-_GOLDENS = _ROOT / "tests/fixtures/cli-json/v5"
+_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v6/schema.json"
+_GOLDENS = _ROOT / "tests/fixtures/cli-json/v6"
+_HISTORICAL_V5_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v5/schema.json"
+_HISTORICAL_V5_GOLDENS = _ROOT / "tests/fixtures/cli-json/v5"
 _HISTORICAL_V1_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v1/schema.json"
 _HISTORICAL_V1_GOLDENS = _ROOT / "tests/fixtures/cli-json/v1"
 _CURRENT_SCHEMA_PATH = _SCHEMA_PATH
@@ -127,6 +129,15 @@ def test_checked_in_goldens_validate_against_the_normative_schema() -> None:
     )
     for path in _HISTORICAL_V1_GOLDENS.glob("*.json"):
         legacy_validator.validate(json.loads(path.read_text(encoding="utf-8")))
+
+    historical_v5_validator = Draft202012Validator(
+        json.loads(_HISTORICAL_V5_SCHEMA_PATH.read_text(encoding="utf-8")),
+        format_checker=FormatChecker(),
+    )
+    historical_v5_goldens = sorted(_HISTORICAL_V5_GOLDENS.glob("*.json"))
+    assert len(historical_v5_goldens) == 15
+    for path in historical_v5_goldens:
+        historical_v5_validator.validate(json.loads(path.read_text(encoding="utf-8")))
 
     historical_validator = _plan_v2_validator()
     historical_goldens = sorted(_PLAN_V2_GOLDENS.glob("*.json"))
@@ -263,8 +274,8 @@ flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=1,
     assert status == 0
     assert "Planned run:" in stderr
     _current_validator().validate(result)
-    assert result["schema_version"] == 3
-    assert result["data"]["record_schema_version"] == 3
+    assert result["schema_version"] == 4
+    assert result["data"]["record_schema_version"] == 4
     attempt = result["data"]["record"]["tasks"][0]["attempts"][0]
     assert [item["number"] for item in attempt["invocations"]] == [1, 2]
     assert attempt["invocations"][0]["status"] == "failed"
@@ -278,8 +289,8 @@ flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=1,
     assert status == 0
     assert stderr == ""
     _current_validator().validate(shown)
-    assert shown["schema_version"] == 3
-    assert shown["data"]["record_schema_version"] == 3
+    assert shown["schema_version"] == 4
+    assert shown["data"]["record_schema_version"] == 4
     assert [
         item["number"]
         for item in shown["data"]["record"]["tasks"][0]["attempts"][0]["invocations"]
@@ -340,16 +351,24 @@ def test_history_schema_binds_record_shape_to_version_even_for_empty_selection()
     for task in old_side["record"]["tasks"]:
         for attempt in task["attempts"]:
             attempt.pop("invocations")
+            attempt.pop("resolution")
+            attempt.pop("materialization_id")
     validator.validate(mixed_compare)
 
     mislabeled_v1 = copy.deepcopy(_current_golden("runs-show.json"))
     mislabeled_v1["data"]["record_schema_version"] = 1
+    for task in mislabeled_v1["data"]["record"]["tasks"]:
+        for attempt in task["attempts"]:
+            attempt.pop("resolution")
+            attempt.pop("materialization_id")
     with pytest.raises(Exception):
         validator.validate(mislabeled_v1)
 
     mislabeled_v2 = copy.deepcopy(_current_golden("runs-show.json"))
     attempt = mislabeled_v2["data"]["record"]["tasks"][0]["attempts"][0]
     attempt.pop("invocations")
+    attempt.pop("resolution")
+    attempt.pop("materialization_id")
     with pytest.raises(Exception):
         validator.validate(mislabeled_v2)
 
@@ -365,16 +384,23 @@ def test_circuit_reasons_are_record_v3_only_and_history_can_mix_versions() -> No
         status="skipped", reason="resource_circuit_open", blocked_by=circuit_ref
     )
     attempt.update(
-        status="skipped", reason="resource_circuit_open", blocked_by=circuit_ref
+        status="skipped",
+        reason="resource_circuit_open",
+        blocked_by=circuit_ref,
+        resolution=None,
+        materialization_id=None,
     )
     validator.validate(circuit)
 
     for old_version in (1, 2):
         old = copy.deepcopy(circuit)
         old["data"]["record_schema_version"] = old_version
-        if old_version == 1:
-            old_attempt = old["data"]["record"]["tasks"][0]["attempts"][0]
-            old_attempt.pop("invocations")
+        for old_task in old["data"]["record"]["tasks"]:
+            for old_attempt in old_task["attempts"]:
+                old_attempt.pop("resolution")
+                old_attempt.pop("materialization_id")
+                if old_version == 1:
+                    old_attempt.pop("invocations")
         with pytest.raises(Exception):
             validator.validate(old)
 
@@ -407,10 +433,16 @@ def test_circuit_reasons_are_record_v3_only_and_history_can_mix_versions() -> No
     mixed = copy.deepcopy(_current_golden("runs-compare.json"))
     left = mixed["data"]["left"]
     left["record_schema_version"] = 2
+    for task in left["record"]["tasks"]:
+        for attempt in task["attempts"]:
+            attempt.pop("resolution")
+            attempt.pop("materialization_id")
     right = mixed["data"]["right"]
     right["record_schema_version"] = 3
     right_task = right["record"]["tasks"][0]
     right_attempt = right_task["attempts"][0]
+    right_attempt.pop("resolution")
+    right_attempt.pop("materialization_id")
     right_task.update(status="skipped", reason="mixed_blocked")
     right_task["blocked_by"] = [
         {"task": {"task_name": "dependency"}, "partition": {"present": False}},
@@ -424,6 +456,39 @@ def test_circuit_reasons_are_record_v3_only_and_history_can_mix_versions() -> No
         ],
     )
     validator.validate(mixed)
+
+
+def test_record_v4_provenance_schema_enforces_terminal_semantics() -> None:
+    validator = _current_validator()
+    valid = copy.deepcopy(_current_golden("runs-show.json"))
+    attempt = valid["data"]["record"]["tasks"][0]["attempts"][0]
+    attempt.update(resolution="materialized", materialization_id="adapter-id")
+    validator.validate(valid)
+
+    missing_materialization_id = copy.deepcopy(valid)
+    missing_materialization_id["data"]["record"]["tasks"][0]["attempts"][0][
+        "materialization_id"
+    ] = None
+    with pytest.raises(Exception):
+        validator.validate(missing_materialization_id)
+
+    id_without_resolution = copy.deepcopy(valid)
+    attempt = id_without_resolution["data"]["record"]["tasks"][0]["attempts"][0]
+    attempt.update(resolution=None, materialization_id="adapter-id")
+    with pytest.raises(Exception):
+        validator.validate(id_without_resolution)
+
+    failed_with_provenance = copy.deepcopy(valid)
+    task = failed_with_provenance["data"]["record"]["tasks"][0]
+    task["status"] = "failed"
+    attempt = task["attempts"][0]
+    attempt.update(
+        status="failed",
+        resolution="executed",
+        materialization_id="adapter-id",
+    )
+    with pytest.raises(Exception):
+        validator.validate(failed_with_provenance)
 
 
 def test_v1_schemas_reject_an_incomplete_completed_document() -> None:

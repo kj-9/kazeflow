@@ -190,7 +190,7 @@ def test_invocation_history_is_validated_and_projected_only_in_version_two() -> 
     assert "output" not in json.dumps(result.to_record(schema_version=2))
 
 
-@pytest.mark.parametrize("schema_version", [0, 4, True, "2"])
+@pytest.mark.parametrize("schema_version", [0, 5, True, "2"])
 def test_result_projection_rejects_unknown_or_boolean_versions(schema_version) -> None:
     with pytest.raises(ValueError, match="schema_version"):
         successful_attempt().to_record(schema_version=schema_version)

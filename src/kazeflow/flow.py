@@ -700,6 +700,8 @@ class _Executor:
                 EventKind.ATTEMPT_FINISHED,
                 attempt=attempt.reference,
                 status=AttemptStatus.SUCCESS,
+                resolution=outcome.resolution,
+                materialization_id=outcome.materialization_id,
             )
 
     def _record_invocation(

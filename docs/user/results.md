@@ -32,7 +32,15 @@ for task in result.tasks:
 ```
 
 `result.to_record()` returns a new JSON-friendly projection. It does not persist the
-run.
+run. The default projection is record v1 for Python compatibility. Pass
+`schema_version=4` to include successful `resolution` and `materialization_id`
+metadata; versions 1–3 retain their previous shapes. A committed execution reports
+`executed` and its committed ID, while a reused output reports `materialized` and its
+ID. Failed, skipped, and cancelled attempts have null provenance fields.
+
+Materialization IDs are opaque, adapter-defined diagnostic strings. They may contain
+application information and are not automatically redacted. Result inspection never
+uses an ID to load an artifact; it does not reconstruct raw keys or outputs.
 
 ## Stored record boundary
 
@@ -42,6 +50,7 @@ run.
 | UTC timestamps and durations | Raw exception objects |
 | Skip reasons and dependency blockers | Dedicated raw partition-key fields |
 | Portable failure metadata | Reconstructed `RunResult` objects |
+| Successful resolution and materialization ID in record v4 | Raw outputs or adapter code |
 
 This table describes structural fields, not redaction. Portable failure metadata
 contains exception messages and tracebacks, which can include partition keys or

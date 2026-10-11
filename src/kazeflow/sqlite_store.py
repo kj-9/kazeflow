@@ -18,7 +18,7 @@ from .results import FlowStatus, RunResult
 
 
 CURRENT_SCHEMA_VERSION = 1
-CURRENT_RECORD_SCHEMA_VERSION = 3
+CURRENT_RECORD_SCHEMA_VERSION = 4
 _TERMINAL_FLOW_STATUSES = frozenset(
     {FlowStatus.SUCCESS.value, FlowStatus.FAILED.value, FlowStatus.CANCELLED.value}
 )
@@ -45,7 +45,7 @@ class StoredRunSummary:
         if (
             isinstance(self.schema_version, bool)
             or not isinstance(self.schema_version, int)
-            or self.schema_version not in (1, 2, CURRENT_RECORD_SCHEMA_VERSION)
+            or self.schema_version not in (1, 2, 3, CURRENT_RECORD_SCHEMA_VERSION)
         ):
             raise ValueError("schema_version must be a supported record version")
         if (
@@ -350,7 +350,7 @@ def _decode_portable_run_record(
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in (1, 2, CURRENT_RECORD_SCHEMA_VERSION)
+        or schema_version not in (1, 2, 3, CURRENT_RECORD_SCHEMA_VERSION)
     ):
         raise ValueError("stored run record has an unsupported record version")
     if not isinstance(record_json, str):
@@ -367,17 +367,73 @@ def _decode_portable_run_record(
         raise ValueError("stored run record tasks must be a list")
     if schema_version == 1 and _record_contains_invocations(decoded):
         raise ValueError("version 1 run records cannot contain invocation history")
-    if schema_version in (2, 3) and not _record_contains_v2_attempt_shapes(decoded):
+    if schema_version in (2, 3, 4) and not _record_contains_v2_attempt_shapes(decoded):
         raise ValueError(
             f"version {schema_version} run records must include invocation arrays"
         )
     _validate_record_skip_reasons(decoded, schema_version)
+    _validate_record_provenance(decoded, schema_version)
     return decoded
+
+
+def _validate_record_provenance(record: dict[str, object], version: int) -> None:
+    """Validate v4 provenance without inventing it for historical attempts."""
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        attempts = task.get("attempts")
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            has_resolution = "resolution" in attempt
+            has_id = "materialization_id" in attempt
+            if version < 4:
+                if has_resolution or has_id:
+                    raise ValueError(
+                        f"version {version} run records cannot contain provenance"
+                    )
+                continue
+
+            if not has_resolution or not has_id:
+                raise ValueError(
+                    "version 4 run record attempts require provenance fields"
+                )
+            resolution = attempt["resolution"]
+            materialization_id = attempt["materialization_id"]
+            status = attempt.get("status")
+            if resolution is not None and (
+                not isinstance(resolution, str)
+                or resolution not in {"executed", "materialized"}
+            ):
+                raise ValueError("version 4 run record has an invalid resolution")
+            if materialization_id is not None and (
+                not isinstance(materialization_id, str) or not materialization_id
+            ):
+                raise ValueError(
+                    "version 4 run record materialization_id must be a non-empty string"
+                )
+            if status == "success":
+                if resolution is None and materialization_id is not None:
+                    raise ValueError(
+                        "version 4 run record materialization_id requires a resolution"
+                    )
+                if resolution == "materialized" and materialization_id is None:
+                    raise ValueError(
+                        "version 4 materialized attempts require a materialization_id"
+                    )
+            elif resolution is not None or materialization_id is not None:
+                raise ValueError(
+                    "version 4 non-success attempts cannot contain provenance"
+                )
 
 
 def _validate_record_skip_reasons(record: dict[str, object], version: int) -> None:
     allowed = {None, "dependency_blocked", "no_partition_keys"}
-    if version == 3:
+    if version in (3, 4):
         allowed |= {"resource_circuit_open", "mixed_blocked"}
     tasks = record["tasks"]
     assert isinstance(tasks, list)

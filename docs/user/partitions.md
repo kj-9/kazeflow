@@ -195,6 +195,11 @@ The middle command returns a failed run after the producer has already committed
 The final command starts a separate process, reuses that committed producer output,
 and executes the downstream asset again.
 
+The [materialization provenance example](https://github.com/kj-9/kazeflow/blob/main/examples/materialization_resume.py)
+can also be run twice with the same store root. It prints the successful result and
+attempt-finished event in portable v4 form, showing `executed` with the committed ID
+first and `materialized` with that ID on the next invocation.
+
 ### Storage and compatibility boundary
 
 The adapter owns storage policy. `FileMaterialization` uses an explicit codec and a
@@ -224,12 +229,15 @@ The adapter adds no third-party runtime dependency and is opt-in. It does not
 provide cross-run exactly-once execution or an external-sink transaction guarantee.
 
 The in-memory attempt result distinguishes `executed` output from `materialized`
-output and carries its materialization ID. The portable CLI JSON,
-`RunResult.to_record()` shape, and SQLite run-store schema do not include this
-provenance in this version. See [Results and history](results.md) and the
-[trust boundary](concepts/trust-boundary.md) before persisting or sharing diagnostic
-records.
+output and carries its materialization ID. Portable result record v4, CLI run and
+history documents, and SQLite rows preserve this successful provenance. The default
+Python `RunResult.to_record()` projection remains v1; request v4 explicitly to include
+it. Older projection versions keep their original shape. See [Results and history](results.md)
+and the [trust boundary](concepts/trust-boundary.md) before persisting or sharing
+diagnostic records.
 
 The normal plan-first workflow remains: review the selected assets and partition
-keys, then explicitly run the same selection. CLI JSON and SQLite run history keep
-the existing portable record and do not report reused outputs in this version.
+keys, then explicitly run the same selection. History inspection reports saved
+resolution and materialization IDs without contacting the adapter or loading output.
+Inspection never resumes a run or reconstructs raw keys or outputs. See the
+[materialization resume example](https://github.com/kj-9/kazeflow/blob/main/examples/materialization_resume.py).

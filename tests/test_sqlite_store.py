@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
@@ -163,7 +164,7 @@ def test_save_load_preserves_the_exact_portable_failure_partition_record(
 
     assert saved.schema_version == CURRENT_RECORD_SCHEMA_VERSION
     assert loaded.schema_version == CURRENT_RECORD_SCHEMA_VERSION
-    assert loaded.record == result.to_record(schema_version=3)
+    assert loaded.record == result.to_record(schema_version=4)
     tasks = _tasks(loaded.record)
     assert [cast(dict[str, object], task["task"])["task_name"] for task in tasks] == [
         "source",
@@ -193,7 +194,7 @@ def test_loaded_record_decodes_a_fresh_independent_dictionary(tmp_path) -> None:
         first = loaded.record
         _attempts(_tasks(first)[0])[0]["status"] = "tampered"
 
-        assert loaded.record == result.to_record(schema_version=3)
+        assert loaded.record == result.to_record(schema_version=4)
 
 
 @pytest.mark.parametrize(
@@ -310,9 +311,9 @@ def test_save_load_list_and_reopen_cover_terminal_record_kinds(tmp_path) -> None
         assert store.list_runs(limit=2) == summaries[:2]
 
     with SQLiteRunStore(path) as reopened:
-        assert reopened.load("alpha").record == results[0].to_record(schema_version=3)
-        assert reopened.load("beta").record == results[1].to_record(schema_version=3)
-        assert reopened.load("gamma").record == results[2].to_record(schema_version=3)
+        assert reopened.load("alpha").record == results[0].to_record(schema_version=4)
+        assert reopened.load("beta").record == results[1].to_record(schema_version=4)
+        assert reopened.load("gamma").record == results[2].to_record(schema_version=4)
 
 
 def test_duplicate_saves_and_missing_loads_do_not_modify_history(tmp_path) -> None:
@@ -357,8 +358,8 @@ def test_invalid_runresult_projection_does_not_persist_or_block_retry(
         assert store.list_runs() == ()
 
         saved = store.save(valid)
-        assert saved.record == valid.to_record(schema_version=3)
-        assert store.load(valid.run_id).record == valid.to_record(schema_version=3)
+        assert saved.record == valid.to_record(schema_version=4)
+        assert store.load(valid.run_id).record == valid.to_record(schema_version=4)
 
 
 def test_constructor_rejects_invalid_paths_before_creating_a_database(
@@ -400,7 +401,7 @@ def test_portable_records_keep_partition_presence_without_raw_values(
     assert cast(dict[str, object], attempt["attempt"])["partition"] == {"present": True}
     assert "partition_key" not in loaded.record_json
     assert "opaque-value-must-not-persist" not in loaded.record_json
-    assert loaded.record == result.to_record(schema_version=3)
+    assert loaded.record == result.to_record(schema_version=4)
 
 
 def test_database_schema_one_reads_mixed_portable_record_versions_without_rewrite(
@@ -416,9 +417,17 @@ def test_database_schema_one_reads_mixed_portable_record_versions_without_rewrit
         sort_keys=True,
     )
     version2_result = _unpartitioned_result("current-v2")
-    current_result = _unpartitioned_result("current-v3")
+    version3_result = _unpartitioned_result("current-v3")
+    current_result = _unpartitioned_result("current-v4")
     version2_json = json.dumps(
         version2_result.to_record(schema_version=2),
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    version3_json = json.dumps(
+        version3_result.to_record(schema_version=3),
         allow_nan=False,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -443,6 +452,18 @@ def test_database_schema_one_reads_mixed_portable_record_versions_without_rewrit
             connection.execute(
                 """
                 INSERT INTO runs (run_id, schema_version, status, saved_at, record_json)
+                VALUES (?, 3, ?, ?, ?)
+                """,
+                (
+                    version3_result.run_id,
+                    version3_result.status.value,
+                    NOW.isoformat(),
+                    version3_json,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO runs (run_id, schema_version, status, saved_at, record_json)
                 VALUES (?, 2, ?, ?, ?)
                 """,
                 (
@@ -455,14 +476,17 @@ def test_database_schema_one_reads_mixed_portable_record_versions_without_rewrit
         assert store.schema_version == 1
         legacy = store.load(legacy_result.run_id)
         version2 = store.load(version2_result.run_id)
+        version3 = store.load(version3_result.run_id)
         current = store.load(current_result.run_id)
         assert legacy.schema_version == 1
         assert legacy.record == legacy_result.to_record()
         assert version2.schema_version == 2
         assert version2.record == version2_result.to_record(schema_version=2)
-        assert current.schema_version == 3
-        assert current.record == current_result.to_record(schema_version=3)
-        assert {entry.schema_version for entry in store.list_runs()} == {1, 2, 3}
+        assert version3.schema_version == 3
+        assert version3.record == version3_result.to_record(schema_version=3)
+        assert current.schema_version == 4
+        assert current.record == current_result.to_record(schema_version=4)
+        assert {entry.schema_version for entry in store.list_runs()} == {1, 2, 3, 4}
 
     with sqlite3.connect(path) as connection:
         unchanged = connection.execute(
@@ -476,10 +500,173 @@ def test_database_schema_one_reads_mixed_portable_record_versions_without_rewrit
             (version2_result.run_id,),
         ).fetchone()[0]
     assert unchanged_v2 == version2_json
+    with sqlite3.connect(path) as connection:
+        unchanged_v3 = connection.execute(
+            "SELECT record_json FROM runs WHERE run_id = ?",
+            (version3_result.run_id,),
+        ).fetchone()[0]
+    assert unchanged_v3 == version3_json
     assert CURRENT_SCHEMA_VERSION == 1
 
 
-def test_circuit_reasons_are_written_as_v3_and_rejected_in_old_record_versions(
+def test_v4_store_round_trip_preserves_executed_and_materialized_provenance(
+    tmp_path,
+) -> None:
+    result = _unpartitioned_result("provenance-v4")
+    source_attempt = result.tasks[0].attempts[0]
+    committed = replace(
+        source_attempt, resolution="executed", materialization_id="artifact-17"
+    )
+    reused = replace(
+        source_attempt, resolution="materialized", materialization_id="artifact-17"
+    )
+    committed_result = replace(
+        result,
+        run_id="committed-v4",
+        tasks=(replace(result.tasks[0], attempts=(committed,)),),
+    )
+    reused_result = replace(
+        result,
+        run_id="reused-v4",
+        tasks=(replace(result.tasks[0], attempts=(reused,)),),
+    )
+
+    with SQLiteRunStore(tmp_path / "provenance-v4.sqlite3") as store:
+        committed_record = store.save(committed_result)
+        reused_record = store.save(reused_result)
+        assert committed_record.schema_version == 4
+        assert reused_record.schema_version == 4
+        for stored in (committed_record, reused_record):
+            attempt = _attempts(_tasks(stored.record)[0])[0]
+            assert attempt["resolution"] in {"executed", "materialized"}
+            assert attempt["materialization_id"] == "artifact-17"
+        assert store.load("committed-v4").record == committed_result.to_record(
+            schema_version=4
+        )
+        assert store.load("reused-v4").record == reused_result.to_record(
+            schema_version=4
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("resolution", None, "materialization_id requires a resolution"),
+        ("resolution", "other", "invalid resolution"),
+        ("resolution", [], "invalid resolution"),
+        ("resolution", "materialized", "require a materialization_id"),
+        ("materialization_id", "", "must be a non-empty string"),
+        ("materialization_id", 3, "must be a non-empty string"),
+    ],
+)
+def test_v4_store_rejects_invalid_provenance_values(
+    tmp_path, field: str, value: object, message: str
+) -> None:
+    path = tmp_path / "invalid-provenance.sqlite3"
+    result = _unpartitioned_result("invalid-provenance")
+    with SQLiteRunStore(path) as store:
+        store.save(result)
+        record = result.to_record(schema_version=4)
+        attempt = _attempts(_tasks(record)[0])[0]
+        if field == "materialization_id":
+            attempt["resolution"] = "executed"
+        elif value is None:
+            attempt["materialization_id"] = "orphaned-id"
+        attempt[field] = value
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE runs SET record_json = ? WHERE run_id = ?",
+                (
+                    json.dumps(record, allow_nan=False, separators=(",", ":")),
+                    result.run_id,
+                ),
+            )
+        with pytest.raises(ValueError, match=message):
+            store.load(result.run_id)
+
+
+@pytest.mark.parametrize("field", ["resolution", "materialization_id"])
+def test_v4_store_requires_both_provenance_fields(tmp_path, field: str) -> None:
+    path = tmp_path / "missing-provenance.sqlite3"
+    result = _unpartitioned_result("missing-provenance")
+    with SQLiteRunStore(path) as store:
+        store.save(result)
+        record = result.to_record(schema_version=4)
+        _attempts(_tasks(record)[0])[0].pop(field)
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE runs SET record_json = ? WHERE run_id = ?",
+                (
+                    json.dumps(record, allow_nan=False, separators=(",", ":")),
+                    result.run_id,
+                ),
+            )
+        with pytest.raises(ValueError, match="require provenance fields"):
+            store.load(result.run_id)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_old_record_versions_reject_provenance_without_rewriting_rows(
+    tmp_path, version: int
+) -> None:
+    path = tmp_path / f"old-v{version}-provenance.sqlite3"
+    result = _unpartitioned_result(f"old-v{version}-provenance")
+    record = result.to_record(schema_version=version)
+    attempt = _attempts(_tasks(record)[0])[0]
+    attempt["resolution"] = "materialized"
+    attempt["materialization_id"] = "must-not-appear-in-v1-v3"
+    record_json = json.dumps(
+        record, allow_nan=False, separators=(",", ":"), sort_keys=True
+    )
+    with SQLiteRunStore(path):
+        pass
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO runs (run_id, schema_version, status, saved_at, record_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                result.run_id,
+                version,
+                result.status.value,
+                NOW.isoformat(),
+                record_json,
+            ),
+        )
+    with SQLiteRunStore(path) as store:
+        with pytest.raises(ValueError, match="cannot contain provenance"):
+            store.load(result.run_id)
+    with sqlite3.connect(path) as connection:
+        unchanged = connection.execute(
+            "SELECT record_json FROM runs WHERE run_id = ?", (result.run_id,)
+        ).fetchone()[0]
+    assert unchanged == record_json
+
+
+def test_v4_store_rejects_provenance_on_non_success_attempt(tmp_path) -> None:
+    path = tmp_path / "failed-provenance.sqlite3"
+    result = _unpartitioned_result("failed-provenance")
+    with SQLiteRunStore(path) as store:
+        store.save(result)
+        record = result.to_record(schema_version=4)
+        attempt = _attempts(_tasks(record)[0])[0]
+        attempt["status"] = "failed"
+        attempt["resolution"] = "executed"
+        attempt["materialization_id"] = "must-not-exist"
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE runs SET record_json = ? WHERE run_id = ?",
+                (
+                    json.dumps(record, allow_nan=False, separators=(",", ":")),
+                    result.run_id,
+                ),
+            )
+        with pytest.raises(ValueError, match="non-success attempts"):
+            store.load(result.run_id)
+
+
+def test_circuit_reasons_are_written_as_v4_and_rejected_in_old_record_versions(
     tmp_path,
 ) -> None:
     source_failure = FailureInfo("RuntimeError", "closed", "traceback")
@@ -525,8 +712,8 @@ def test_circuit_reasons_are_written_as_v3_and_rejected_in_old_record_versions(
 
     with SQLiteRunStore(path) as store:
         saved = store.save(result)
-        assert saved.schema_version == 3
-        assert store.load(result.run_id).record == result.to_record(schema_version=3)
+        assert saved.schema_version == 4
+        assert store.load(result.run_id).record == result.to_record(schema_version=4)
         new_record = result.to_record(schema_version=3)
 
         for location, reason, status in (

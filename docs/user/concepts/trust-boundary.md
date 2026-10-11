@@ -26,7 +26,11 @@ storage behavior fits the data and concurrency risks of the application.
 
 `RunResult.to_record()`, CLI JSON, and SQLite storage deliberately omit arbitrary
 task outputs, raw exception objects, and the dedicated raw partition-key field.
-They retain portable failure metadata: exception type, message, and traceback.
+Record v4 also carries successful resolution and adapter-defined materialization IDs
+as diagnostic metadata. These IDs are opaque, may contain application information,
+and are not automatically redacted. History inspection does not contact adapters or
+load artifacts. Portable records retain failure metadata: exception type, message,
+and traceback.
 
 Those strings are controlled by the application and Python runtime. An asset can
 include a partition key, credential fragment, path, query, or other sensitive value

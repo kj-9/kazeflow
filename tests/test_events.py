@@ -46,6 +46,8 @@ def test_event_signature_defaults_and_immutability() -> None:
         "invocation_number",
         "retry_delay_seconds",
         "cooldown_seconds",
+        "resolution",
+        "materialization_id",
     ]
     assert ExecutionEvent.__dataclass_fields__["task"].default is None
     assert ExecutionEvent.__dataclass_fields__["blocked_by"].default == ()
@@ -183,10 +185,12 @@ def test_event_record_is_fixed_and_lossy() -> None:
     current = value.to_record()
     assert current == {
         **legacy,
-        "schema_version": 3,
+        "schema_version": 4,
         "invocation_number": None,
         "retry_delay_seconds": None,
         "cooldown_seconds": None,
+        "resolution": None,
+        "materialization_id": None,
     }
     assert "partition_key" not in str(current)
     assert not hasattr(value, "output")
@@ -213,7 +217,7 @@ def test_invocation_event_payloads_and_versioned_records() -> None:
     )
 
     assert started.to_record()["invocation_number"] == 1
-    assert finished.to_record()["schema_version"] == 3
+    assert finished.to_record()["schema_version"] == 4
     assert finished.to_record(schema_version=2)["schema_version"] == 2
     assert finished.to_record()["retry_delay_seconds"] == 0.25
     with pytest.raises(ValueError, match="cannot be projected"):
@@ -541,7 +545,7 @@ def test_circuit_skip_requires_an_earlier_failed_source_and_allows_retry_history
         event(12, EventKind.FLOW_FINISHED, status=FlowStatus.FAILED),
     )
     validate_event_sequence(events)
-    assert events[9].to_record()["schema_version"] == 3
+    assert events[9].to_record()["schema_version"] == 4
     for version in (1, 2):
         with pytest.raises(ValueError, match="cannot be projected"):
             events[9].to_record(schema_version=version)

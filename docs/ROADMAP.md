@@ -59,8 +59,9 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 - #1: `add-partition-outcome-queries` — terminal failed/circuit-skipped key取得、元keyの順序・identity、明示的新規run selection。
 - #2: `add-partition-materialization-reuse` — 明示adapter、version/input ID照合、commit後の下流公開、in-memory provenance。
 - #2: `add-file-materialization-adapter` — 明示codec、manifest整合性検証、atomic publication、別プロセスでの再利用。
+- #2: `record-materialization-provenance` — portable result/event/CLI v4、SQLiteの混在record、commit/reuseのIDと実行方法。
 
-次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。次は #2 のmaterialization provenanceを進める。
+次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。次は #2 の明示的materialization invalidationを進める。
 
 | 順序 | Issue | Change | 完了条件・依存関係 |
 | --- | --- | --- | --- |
@@ -69,7 +70,7 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 | 3 | #1 | `add-resource-retry-cooldown` | 2026-10-11完了・archive済み。classifier、permit再取得、slotを占有しない待機、共有cooldown、versioned result/event契約を検証。 |
 | 4 | #1 | `add-resource-circuit-breaker` | 2026-10-11完了・archive済み。回復不能エラーの明示分類、原因attempt付きskip、実行中work・materialization hit、versioned record/eventを検証。 |
 | 5 | #1 | `add-partition-outcome-queries` | 2026-10-12完了・archive済み。failed/circuit-skipped key取得、falsey/opaque key、unknown/unpartitioned taskの診断、明示的rerunを検証。 |
-| 6 | #2 | `record-materialization-provenance` | executed/materializedとIDをportable result、CLI、SQLite、eventへversion管理付きで反映。retry契約と整合。 |
+| 6 | #2 | `record-materialization-provenance` | 2026-10-12完了・archive済み。executed/materializedとIDをportable result/event/CLI v4へ反映。SQLite DB v1とrecord v1–v4の混在、retryとの整合を検証。 |
 | 7 | #2 | `add-materialization-invalidation` | 明示invalidation/tombstone、互換性・破損理由、コピー後の古いartifact復活防止。file manifest契約に依存。 |
 | 8 | #2 | `add-depth-first-partition-groups` | 同一keyのasset列、active key数上限、通常のdependency/result orderingとの整合。 |
 | 9 | #2 | `add-available-materialization-aggregation` | 一部失敗後もcommitted成果物を列挙して集約、過去成果物の選択範囲、単一atomic publicationとreceipt。 |

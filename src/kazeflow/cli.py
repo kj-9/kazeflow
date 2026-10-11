@@ -33,8 +33,8 @@ EXIT_INFRASTRUCTURE = 4
 _DEFAULT_HISTORY_STORE = Path(".kazeflow") / "runs.sqlite3"
 _CLI_DOCUMENT_SCHEMA_VERSION = 1
 _PLAN_DOCUMENT_SCHEMA_VERSION = 4
-_PORTABLE_RECORD_SCHEMA_VERSION = 3
-_HISTORY_DOCUMENT_SCHEMA_VERSION = 3
+_PORTABLE_RECORD_SCHEMA_VERSION = 4
+_HISTORY_DOCUMENT_SCHEMA_VERSION = 4
 
 
 class _UsageError(Exception):
@@ -590,6 +590,10 @@ def _emit_attempt_details(result: Any) -> None:
             ]
             if attempt.reason is not None:
                 detail.append(f"reason: {attempt.reason.value}")
+            if attempt.resolution is not None:
+                detail.append(f"resolution: {attempt.resolution}")
+            if attempt.materialization_id is not None:
+                detail.append(f"materialization_id: {attempt.materialization_id}")
             if attempt.failure is not None:
                 detail.append(
                     "failure: "

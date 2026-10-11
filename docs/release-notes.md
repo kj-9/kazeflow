@@ -1,5 +1,23 @@
 # Release notes
 
+## Unreleased: Materialization provenance
+
+- Portable result record v4 preserves the resolution (`executed` or
+  `materialized`) and materialization ID on successful attempts. Failed, skipped,
+  and cancelled attempts carry null provenance. Python `RunResult.to_record()`
+  continues to default to v1; versions 1–3 retain their existing shapes.
+- Event projection defaults to v4 and adds nullable provenance to successful
+  attempt-finished events. Explicit event versions 1–3 keep their existing shapes.
+- CLI run and history envelopes advance to v4, while plan remains v4 and other
+  documents remain v1. The schema collection advances to v6. SQLite database
+  layout remains v1; new rows use portable record v4 and historical v1–v3 rows
+  remain readable.
+- Materialization IDs are opaque adapter-defined diagnostic strings. They may
+  contain application information and are not automatically redacted. History
+  inspection displays saved IDs without contacting adapters or loading outputs.
+- Added a runnable example and installed-wheel smoke coverage for committed and
+  reused provenance in results, events, and portable record v4.
+
 ## Unreleased: Partition outcome queries
 
 - Live `RunResult` objects expose `failed_partition_keys(task_name)` and

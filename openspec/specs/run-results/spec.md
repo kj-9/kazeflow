@@ -43,11 +43,7 @@ RunResult(run_id: str, status: FlowStatus, started_at: datetime,
           tasks: tuple[TaskResult, ...] = ())
 ```
 
-`resolution` SHALL be `executed` or `materialized` for successful attempts and
-`None` for other statuses. `materialization_id` SHALL be present only for a
-successful materialized asset attempt with a committed record; it SHALL be absent
-for ordinary successful attempts and failures. These fields are in-memory only
-in this change; existing `to_record()` keys and schemas SHALL remain unchanged.
+`resolution` SHALL be `executed` or `materialized` for executor-produced successful attempts and `None` for other statuses. Manually constructed successful attempts MAY retain unknown resolution as `None` without an ID. `materialization_id` SHALL be a non-empty string for reused materialized successes and MAY also be present for executed successes with a completed commit. It SHALL be absent for ordinary successful attempts and non-success outcomes. IDs require a known resolution. Existing zero-argument and explicit version 1–3 projections SHALL retain their prior shapes; version 4 SHALL export these fields.
 
 `TaskReference.task_name` and `RunResult.run_id` SHALL be non-empty strings. An
 absent partition SHALL be represented only by `partition_key_present=False` and
@@ -67,7 +63,7 @@ SHALL remain tuples and result envelopes SHALL not be structurally mutable.
 
 #### Scenario: A reused attempt is identifiable in memory
 - **WHEN** a committed materialization supplies a successful attempt's output
-- **THEN** that attempt's in-memory resolution is `materialized` and it has a committed materialization identifier while its portable record retains the existing shape
+- **THEN** that attempt's in-memory resolution is `materialized` and it has a committed materialization identifier while its historical portable projections retain their existing shapes and version 4 reports this metadata
 
 ### Requirement: Result snapshots are completed, time-valid terminal outcomes
 `AttemptResult` and `TaskResult` SHALL accept only terminal `AttemptStatus` values:
@@ -171,8 +167,12 @@ A logical attempt SHALL optionally retain an immutable ordered invocation histor
 - **THEN** its final status is success and its ordered history contains failed invocation 1 followed by successful invocation 2
 
 ### Requirement: Result projections support explicit portable record versions
-Existing zero-argument result projections SHALL preserve portable record version 1. Explicit version 2 projections SHALL add an ordered `invocations` array to each attempt, with number, status, start/end/duration, nullable failure, retry-delay and cooldown seconds. Other record fields SHALL remain identical. Explicit version 3 SHALL preserve version 2 fields and support circuit and mixed-blocked reasons. Versions 1 and 2 SHALL reject results containing these new reasons instead of mislabeling them. Unknown or boolean versions SHALL be rejected. Both projections SHALL omit raw outputs, raw exceptions, raw partition keys, classifier code and materialization provenance.
+Existing zero-argument result projections SHALL preserve portable record version 1. Explicit version 2 projections SHALL add an ordered `invocations` array to each attempt, with number, status, start/end/duration, nullable failure, retry-delay and cooldown seconds. Explicit version 3 SHALL preserve version 2 fields and support circuit and mixed-blocked reasons. Versions 1 and 2 SHALL reject results containing these new reasons. Explicit version 4 SHALL preserve version 3 fields and add nullable resolution and materialization_id to every attempt using the successful provenance contract. Versions 1–3 SHALL retain their prior shapes and omit provenance. Unknown or boolean versions SHALL be rejected. All versions SHALL omit raw outputs, raw exceptions, raw partition keys and classifier code.
 
 #### Scenario: Export retry history safely
 - **WHEN** a recovered result is projected explicitly as portable record version 2
-- **THEN** its invocation history is included without raw output/exception/key values and version 1 remains available with its original shape
+- **THEN** invocation history is included without raw output/exception/key values and version 1 retains its original shape
+
+#### Scenario: Export committed provenance
+- **WHEN** a successful committed or reused result is projected as version 4
+- **THEN** resolution and ID are present and projecting versions 1–3 still omits both fields

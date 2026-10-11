@@ -74,6 +74,78 @@ with tempfile.TemporaryDirectory(prefix="kazeflow-file-materialization-") as tem
         raise AssertionError("JsonCodec must reject tuples")
 
 
+class EventCollector:
+    def __init__(self):
+        self.events = []
+
+    def on_event(self, event):
+        self.events.append(event)
+
+
+with tempfile.TemporaryDirectory(prefix="kazeflow-provenance-") as temporary:
+    provenance_store = FileMaterialization(
+        Path(temporary) / "store", codec=JsonCodec()
+    )
+    body_calls = []
+
+    @kazeflow.asset(
+        partition_def=DatePartitionDef(),
+        materialization=provenance_store,
+        version="wheel-provenance-v1",
+    )
+    def materialized_asset(context: AssetContext):
+        body_calls.append(context.partition_key)
+        return {"day": context.partition_key.isoformat(), "rows": [42]}
+
+    provenance_flow = Flow(["materialized_asset"])
+    first_events = EventCollector()
+    first_result = asyncio.run(
+        provenance_flow.run_async(
+            {"partition_keys": ["2026-10-12"]}, event_consumer=first_events
+        )
+    )
+    second_events = EventCollector()
+    second_result = asyncio.run(
+        provenance_flow.run_async(
+            {"partition_keys": ["2026-10-12"]}, event_consumer=second_events
+        )
+    )
+    assert len(body_calls) == 1
+    first_attempt = first_result.tasks[0].attempts[0]
+    second_attempt = second_result.tasks[0].attempts[0]
+    assert first_attempt.resolution == "executed"
+    assert first_attempt.materialization_id
+    assert second_attempt.resolution == "materialized"
+    assert second_attempt.materialization_id == first_attempt.materialization_id
+    assert first_result.to_record()["tasks"][0]["attempts"][0].get("resolution") is None
+    first_record = first_result.to_record(schema_version=4)
+    second_record = second_result.to_record(schema_version=4)
+    assert first_record["tasks"][0]["attempts"][0]["resolution"] == "executed"
+    assert second_record["tasks"][0]["attempts"][0]["resolution"] == "materialized"
+    assert (
+        first_record["tasks"][0]["attempts"][0]["materialization_id"]
+        == second_record["tasks"][0]["attempts"][0]["materialization_id"]
+    )
+    first_finish = next(
+        event
+        for event in first_events.events
+        if event.kind.value == "attempt_finished"
+    )
+    second_finish = next(
+        event
+        for event in second_events.events
+        if event.kind.value == "attempt_finished"
+    )
+    assert first_finish.to_record()["schema_version"] == 4
+    assert second_finish.to_record()["schema_version"] == 4
+    assert first_finish.to_record()["resolution"] == "executed"
+    assert second_finish.to_record()["resolution"] == "materialized"
+    assert (
+        first_finish.to_record()["materialization_id"]
+        == second_finish.to_record()["materialization_id"]
+    )
+
+
 @kazeflow.asset
 def complete():
     side_effects.append("ran")
@@ -204,8 +276,8 @@ run_cli = subprocess.run(
 )
 run_document = json.loads(run_cli.stdout)
 assert run_document["document_type"] == "kazeflow.run-result"
-assert run_document["schema_version"] == 3
-assert run_document["data"]["record_schema_version"] == 3
+assert run_document["schema_version"] == 4
+assert run_document["data"]["record_schema_version"] == 4
 assert run_document["data"]["record"]["status"] == "success"
 source_record = next(task for task in run_document["data"]["record"]["tasks"] if task["task"]["task_name"] == "source")
 assert [item["number"] for item in source_record["attempts"][0]["invocations"]] == [1, 2]
@@ -230,8 +302,8 @@ history = subprocess.run(
 history_document = json.loads(history.stdout)
 assert history_document["document_type"] == "kazeflow.runs-show"
 assert history_document["data"]["run_id"] == stored_run_id
-assert history_document["schema_version"] == 3
-assert history_document["data"]["record_schema_version"] == 3
+assert history_document["schema_version"] == 4
+assert history_document["data"]["record_schema_version"] == 4
 assert history_document["data"]["store_schema_version"] >= 1
 
 circuit_file = Path("circuit_flow.py")
@@ -263,8 +335,8 @@ circuit_run = subprocess.run(
 )
 assert circuit_run.returncode == 1
 circuit_document = json.loads(circuit_run.stdout)
-assert circuit_document["schema_version"] == 3
-assert circuit_document["data"]["record_schema_version"] == 3
+assert circuit_document["schema_version"] == 4
+assert circuit_document["data"]["record_schema_version"] == 4
 circuit_tasks = {
     task["task"]["task_name"]: task
     for task in circuit_document["data"]["record"]["tasks"]

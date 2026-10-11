@@ -118,6 +118,8 @@ class ExecutionEvent:
     invocation_number: int | None = None
     retry_delay_seconds: float | None = None
     cooldown_seconds: float | None = None
+    resolution: str | None = None
+    materialization_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or not self.run_id:
@@ -148,6 +150,24 @@ class ExecutionEvent:
             raise ValueError("invocation_number must be a positive integer or None")
         _validate_optional_seconds(self.retry_delay_seconds, "retry_delay_seconds")
         _validate_optional_seconds(self.cooldown_seconds, "cooldown_seconds")
+
+        if self.resolution is not None or self.materialization_id is not None:
+            if (
+                self.kind is not EventKind.ATTEMPT_FINISHED
+                or self.status is not AttemptStatus.SUCCESS
+            ):
+                raise ValueError(
+                    "provenance is only valid for successful attempt finishes"
+                )
+            if self.resolution not in ("executed", "materialized"):
+                raise ValueError("resolution must be executed or materialized")
+            if self.materialization_id is not None and (
+                not isinstance(self.materialization_id, str)
+                or not self.materialization_id
+            ):
+                raise ValueError("materialization_id must be a non-empty string")
+            if self.resolution == "materialized" and self.materialization_id is None:
+                raise ValueError("materialized resolution requires materialization_id")
 
         if self.kind is EventKind.FLOW_STARTED:
             self._validate_flow_started()
@@ -286,14 +306,14 @@ class ExecutionEvent:
                 "retry delays are only valid for failed invocation finishes"
             )
 
-    def to_record(self, *, schema_version: int = 3) -> dict[str, object]:
+    def to_record(self, *, schema_version: int = 4) -> dict[str, object]:
         """Return the fixed, intentionally lossy event record projection."""
         if (
             isinstance(schema_version, bool)
             or not isinstance(schema_version, int)
-            or schema_version not in (1, 2, 3)
+            or schema_version not in (1, 2, 3, 4)
         ):
-            raise ValueError("schema_version must be 1, 2, or 3")
+            raise ValueError("schema_version must be 1, 2, 3, or 4")
         if schema_version in (1, 2) and self.reason in {
             SkipReason.RESOURCE_CIRCUIT_OPEN,
             SkipReason.MIXED_BLOCKED,
@@ -320,7 +340,7 @@ class ExecutionEvent:
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
             "failure": self.failure.to_record() if self.failure is not None else None,
         }
-        if schema_version in (2, 3):
+        if schema_version in (2, 3, 4):
             record.update(
                 {
                     "schema_version": schema_version,
@@ -329,6 +349,9 @@ class ExecutionEvent:
                     "cooldown_seconds": self.cooldown_seconds,
                 }
             )
+        if schema_version == 4:
+            record["resolution"] = self.resolution
+            record["materialization_id"] = self.materialization_id
         return record
 
 

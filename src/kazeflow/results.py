@@ -76,9 +76,9 @@ def _validate_record_version(schema_version: int) -> None:
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in (1, 2, 3)
+        or schema_version not in (1, 2, 3, 4)
     ):
-        raise ValueError("schema_version must be 1, 2, or 3")
+        raise ValueError("schema_version must be 1, 2, 3, or 4")
 
 
 def _validate_reason_version(reason: SkipReason | None, schema_version: int) -> None:
@@ -324,10 +324,13 @@ class AttemptResult:
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
             "failure": None if self.failure is None else self.failure.to_record(),
         }
-        if schema_version in (2, 3):
+        if schema_version in (2, 3, 4):
             record["invocations"] = [
                 invocation.to_record() for invocation in self.invocations
             ]
+        if schema_version == 4:
+            record["resolution"] = self.resolution
+            record["materialization_id"] = self.materialization_id
         return record
 
 

@@ -19,11 +19,21 @@ portable projection boundary.
 `AttemptResult.invocations` records body/commit operations only when retry behavior
 is enabled for the resource. The logical partition attempt remains one result with
 one terminal status. `RunResult.to_record()` defaults to record schema v1 for Python
-compatibility; pass `schema_version=2` to include invocation history, or `3` to
-include resource circuit skip reasons. Circuit skips retain the originating failed
-attempt in `blocked_by`. Portable references intentionally retain only the task name
-and whether a partition key was present; they do not serialize the raw key, so
-different partitions of one task may not be distinguishable in a portable record.
+compatibility; pass `schema_version=2` to include invocation history, `3` to include
+resource circuit skip reasons, or `4` to include successful materialization
+provenance. Circuit skips retain the originating failed attempt in `blocked_by`.
+Portable references intentionally retain only the task name and whether a partition
+key was present; they do not serialize the raw key, so different partitions of one
+task may not be distinguishable in a portable record.
+
+Record v4 adds `resolution` and `materialization_id` to each attempt. A successful
+ordinary execution reports `executed` with a null ID; a successful committed
+execution reports `executed` with its committed ID; a reuse reports `materialized`
+with its ID. Failed, skipped, and cancelled attempts report null for both fields.
+Hand-built successful results may leave both unknown. Versions 1–3 keep their
+existing shape, and the zero-argument projection remains v1. Materialization IDs
+are opaque, adapter-defined diagnostic strings. They are not interpreted as keys,
+automatically redacted, or used to load artifacts during inspection.
 
 For a live `RunResult`, `failed_partition_keys(task_name)` returns the original keys
 for terminal failed attempts, and `circuit_skipped_partition_keys(task_name)` returns

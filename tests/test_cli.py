@@ -31,10 +31,10 @@ def _json_data(stdout: str, document_type: str) -> dict[str, Any]:
     document = json.loads(stdout)
     versions = {
         "kazeflow.plan": 4,
-        "kazeflow.run-result": 3,
-        "kazeflow.runs-list": 3,
-        "kazeflow.runs-show": 3,
-        "kazeflow.runs-compare": 3,
+        "kazeflow.run-result": 4,
+        "kazeflow.runs-list": 4,
+        "kazeflow.runs-show": 4,
+        "kazeflow.runs-compare": 4,
     }
     assert document == {
         "document_type": document_type,
@@ -684,12 +684,132 @@ def publish():
 
     assert status == 0
     run = _json_data(stdout, "kazeflow.run-result")
-    assert run["record_schema_version"] == 3
+    assert run["record_schema_version"] == 4
     record = run["record"]
     assert record["status"] == "success"
     assert "raw output must not be serialized" not in stdout
     assert "Planned run:" in stderr
     assert "Run result:" not in stderr
+
+
+def test_run_and_saved_history_report_executed_then_reused_provenance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "materialized.json"
+    entry = _script(
+        tmp_path,
+        "materialized.py",
+        f"""
+import json
+from pathlib import Path
+from kazeflow import DatePartitionDef, MaterializationRecord, asset
+
+marker = Path({str(marker)!r})
+materialization_id = "opaque-application-id"
+
+def record(context):
+    return MaterializationRecord(
+        materialization_id=materialization_id,
+        asset_name=context.asset_name,
+        version=context.version,
+        partition_domain=context.partition_domain,
+        partition_key_present=context.partition_key_present,
+        partition_key=context.partition_key,
+        input_materialization_ids=context.input_materialization_ids,
+        committed=True,
+    )
+
+class Adapter:
+    def resolve(self, context):
+        return record(context) if marker.exists() else None
+
+    def load(self, candidate):
+        return "loaded from materialization"
+
+    def commit(self, context, output):
+        marker.write_text(json.dumps(output), encoding="utf-8")
+        return record(context)
+
+@asset(partition_def=DatePartitionDef(), version="v1", materialization=Adapter())
+def publish():
+    return "executed once"
+""",
+    )
+    database = tmp_path / "provenance.sqlite3"
+
+    status, stdout, _stderr = _run(
+        capsys,
+        [
+            "run",
+            str(entry),
+            "--yes",
+            "--partition-key",
+            "2026-08-12",
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+    assert status == 0
+    executed = _json_data(stdout, "kazeflow.run-result")
+    first_id = executed["record"]["run_id"]
+    first_attempt = executed["record"]["tasks"][0]["attempts"][0]
+    assert first_attempt["resolution"] == "executed"
+    assert first_attempt["materialization_id"] == "opaque-application-id"
+
+    status, stdout, _stderr = _run(
+        capsys,
+        [
+            "run",
+            str(entry),
+            "--yes",
+            "--partition-key",
+            "2026-08-12",
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+    assert status == 0
+    reused = _json_data(stdout, "kazeflow.run-result")
+    second_id = reused["record"]["run_id"]
+    second_attempt = reused["record"]["tasks"][0]["attempts"][0]
+    assert second_attempt["resolution"] == "materialized"
+    assert second_attempt["materialization_id"] == "opaque-application-id"
+
+    status, stdout, stderr = _run(
+        capsys,
+        ["runs", "show", second_id, "--store", str(database), "--format", "json"],
+    )
+    assert status == 0
+    assert stderr == ""
+    shown = _json_data(stdout, "kazeflow.runs-show")
+    saved_attempt = shown["record"]["tasks"][0]["attempts"][0]
+    assert saved_attempt["resolution"] == "materialized"
+    assert saved_attempt["materialization_id"] == "opaque-application-id"
+    with SQLiteRunStore(database) as store:
+        assert (
+            json.loads(store.load(first_id).record_json)["tasks"][0]["attempts"][0][
+                "resolution"
+            ]
+            == "executed"
+        )
+        assert (
+            json.loads(store.load(second_id).record_json)["tasks"][0]["attempts"][0][
+                "resolution"
+            ]
+            == "materialized"
+        )
+
+    status, stdout, _stderr = _run(
+        capsys,
+        ["run", str(entry), "--yes", "--partition-key", "2026-08-12", "--verbose"],
+    )
+    assert status == 0
+    assert "resolution: materialized" in stdout
+    assert "materialization_id: opaque-application-id" in stdout
 
 
 def test_run_reports_asset_failure_as_completed_json_result(
@@ -1019,7 +1139,7 @@ def publish():
     assert stderr == ""
     history = _json_data(stdout, "kazeflow.runs-list")
     assert history["runs"][0]["run_id"] == run_id
-    assert history["runs"][0]["record_schema_version"] == 3
+    assert history["runs"][0]["record_schema_version"] == 4
     assert history["runs"][0]["status"] == "success"
     assert history["runs"][0]["saved_at"].endswith("+00:00")
 
@@ -1071,7 +1191,7 @@ def publish():
     assert stderr == ""
     shown = _json_data(stdout, "kazeflow.runs-show")
     assert shown["run_id"] == success_id
-    assert shown["record_schema_version"] == 3
+    assert shown["record_schema_version"] == 4
     assert shown["store_schema_version"] == 1
     assert shown["record"]["tasks"][0]["attempts"][0]["attempt"]["partition"] == {
         "present": False
