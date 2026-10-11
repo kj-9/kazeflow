@@ -102,6 +102,34 @@ custom definition accepts `0`, `""`, or `False`, each is a present key—not omi
 work. A custom definition should publish a stable domain and normalization contract
 when it needs stricter validation.
 
+## Inspect and explicitly select outcomes
+
+After a run, use the live result to select terminal failures or resource circuit
+skips for a partitioned task:
+
+```python
+failed = result.failed_partition_keys("publish_daily")
+circuit_skipped = result.circuit_skipped_partition_keys("publish_daily")
+retry_keys = failed + circuit_skipped
+
+# A subsequent run is an explicit application decision.
+retry_result = run(
+    ["publish_daily"],
+    {"partition_keys": retry_keys},
+)
+```
+
+The queries return original key objects in attempt order. They include falsey keys,
+and select terminal outcomes: a recovered invocation is not reported as failed, and
+only skips with reason `resource_circuit_open` appear in the circuit query. A missing
+task raises `KeyError`; a present unpartitioned task raises `ValueError`. The returned
+tuple is immutable, while any mutable key objects inside it remain application-owned.
+These helpers require the live `RunResult`; portable records intentionally omit raw
+keys and cannot restore them. Passing keys to a new run is explicit; no automatic
+resume occurs.
+
+See the [runnable partition outcome example](https://github.com/kj-9/kazeflow/blob/main/examples/partition_outcomes.py).
+
 ## Keep the portable boundary in mind
 
 The portable **plan** JSON reports selection kind, domain, and safe counts. Portable

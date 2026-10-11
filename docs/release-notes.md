@@ -1,5 +1,16 @@
 # Release notes
 
+## Unreleased: Partition outcome queries
+
+- Live `RunResult` objects expose `failed_partition_keys(task_name)` and
+  `circuit_skipped_partition_keys(task_name)` to return original partition keys for
+  matching terminal outcomes, in attempt order. The queries preserve falsey keys and
+  distinguish circuit skips from other skipped work.
+- The methods are in-memory only. Portable records continue to omit raw partition
+  keys; selecting keys for another run remains an explicit application decision.
+- Added a runnable example showing how to inspect outcomes and explicitly choose keys
+  for a later run.
+
 ## Unreleased: Local file materialization
 
 - Added opt-in `kazeflow.file_materialization.FileMaterialization` for reuse of

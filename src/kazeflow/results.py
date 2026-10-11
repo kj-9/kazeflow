@@ -508,6 +508,45 @@ class RunResult:
         if self.status is not expected_status:
             raise ValueError("run status must match its task outcomes")
 
+    def _partitioned_task(self, task_name: str) -> TaskResult:
+        if not isinstance(task_name, str):
+            raise TypeError("task_name must be a string")
+        for task in self.tasks:
+            if task.task.task_name == task_name:
+                if not task.is_partitioned:
+                    raise ValueError(f"task {task_name!r} is not partitioned")
+                return task
+        raise KeyError(task_name)
+
+    def failed_partition_keys(self, task_name: str) -> tuple[object, ...]:
+        """Return original keys of terminal failures in attempt order.
+
+        Recovered retries, skips and cancellations are excluded. Keys are live,
+        application-owned objects; portable records cannot reconstruct them.
+        Raises TypeError for non-string names, KeyError for missing tasks and
+        ValueError for unpartitioned tasks.
+        """
+        task = self._partitioned_task(task_name)
+        return tuple(
+            attempt.attempt.partition_key
+            for attempt in task.attempts
+            if attempt.status is AttemptStatus.FAILED
+        )
+
+    def circuit_skipped_partition_keys(self, task_name: str) -> tuple[object, ...]:
+        """Return original keys skipped by an open circuit in attempt order.
+
+        Dependency skips and cancellations are excluded. Keys retain their live
+        object identity. Lookup errors match failed_partition_keys.
+        """
+        task = self._partitioned_task(task_name)
+        return tuple(
+            attempt.attempt.partition_key
+            for attempt in task.attempts
+            if attempt.status is AttemptStatus.SKIPPED
+            and attempt.reason is SkipReason.RESOURCE_CIRCUIT_OPEN
+        )
+
     def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
         _validate_record_version(schema_version)
         for task in self.tasks:

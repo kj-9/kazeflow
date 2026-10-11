@@ -14,6 +14,8 @@ import venv
 
 CORE_PROGRAM = """
 import json
+import asyncio
+from datetime import date
 from importlib import resources
 from pathlib import Path
 import subprocess
@@ -22,11 +24,15 @@ import tempfile
 
 import kazeflow
 from kazeflow import (
+    AssetContext,
+    DatePartitionDef,
     Flow,
     FlowPlan,
     Materialization,
     MaterializationContext,
     MaterializationRecord,
+    OpenCircuit,
+    ResourcePolicy,
     RunResult,
 )
 from kazeflow.results import AttemptStatus, FlowStatus
@@ -86,6 +92,36 @@ assert result.tasks[0].status is AttemptStatus.SUCCESS
 assert result.tasks[0].attempts[0].output == "complete"
 assert side_effects == ["ran"]
 assert not any(name == "rich" or name.startswith("rich.") for name in sys.modules)
+
+@kazeflow.asset(partition_def=DatePartitionDef(), resource="wheel-query")
+def query_partitions(context: AssetContext):
+    if context.partition_key.isoformat() == "2026-08-12":
+        raise OSError("temporary remote failure")
+    return "published"
+
+query_flow = Flow(
+    ["query_partitions"],
+    resources={
+        "wheel-query": ResourcePolicy(
+            max_concurrency=1,
+            classify_failure=lambda error: OpenCircuit(),
+        )
+    },
+)
+query_result = asyncio.run(
+    query_flow.run_async(
+        {"partition_keys": ["2026-08-11", "2026-08-12", "2026-08-13"]}
+    )
+)
+assert query_result.failed_partition_keys("query_partitions") == (
+    date(2026, 8, 12),
+)
+assert query_result.circuit_skipped_partition_keys("query_partitions") == (
+    date(2026, 8, 13),
+)
+query_record_before = query_result.to_record(schema_version=3)
+assert query_result.failed_partition_keys("query_partitions")
+assert query_result.to_record(schema_version=3) == query_record_before
 
 flow_file = Path("smoke_flow.py")
 flow_file.write_text(
