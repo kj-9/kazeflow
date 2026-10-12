@@ -11,6 +11,7 @@ from .materialization import (
 )
 from .partition import DatePartitionDef, PartitionDef
 from .plan import FlowPlan
+from .resource_statistics import ResourceStatistics
 from .results import InvocationResult, RunResult
 from .resources import (
     Fail,
@@ -45,6 +46,7 @@ __all__ = [
     "RunConfig",
     "RunResult",
     "ResourcePolicy",
+    "ResourceStatistics",
     "Retry",
     "run",
 ]

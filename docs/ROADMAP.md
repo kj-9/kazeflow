@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M17 Complete; Issue #1・#2 follow-ups prioritized; M18 deferred
+> Status: M0–M17 Complete; Issue #1・#2 follow-ups implemented and locally verified; GitHub integration pending; M18 deferred
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -63,8 +63,9 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 - #2: `add-materialization-invalidation` — exact identityのepoch ledger、旧artifact復元の拒否、明示的rebuild、診断inspection。
 - #2: `add-depth-first-partition-groups` — 明示asset列のactive key cap、depth-first admission、plan JSON v5と既存result順序の維持。
 - #2: `add-available-materialization-aggregation` — 明示contextのcommitted成果物collection、失敗診断を保持した部分集約、単一local snapshotとreceipt。
+- #1: `add-resource-execution-statistics` — actual body/commitの実行・成否・retry、観測resource admission待機、live result統計lookup。
 
-次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。Issue #2の上記必須追加機能は完了。Issue #1の完了範囲auditで残ったresource実行・待機・retry統計を次に扱う。
+次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。Issue #1・#2の必須追加機能はローカル実装・検証済み。IssueのcloseはGitHub反映とCI成功後に、明示的な承認を得て行う。
 
 | 順序 | Issue | Change | 完了条件・依存関係 |
 | --- | --- | --- | --- |
@@ -77,7 +78,7 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 | 7 | #2 | `add-materialization-invalidation` | 2026-10-12完了・archive済み。明示invalidation/epoch ledger、互換性・破損診断、ledger保持下の旧artifact復活防止とrebuildを検証。 |
 | 8 | #2 | `add-depth-first-partition-groups` | 2026-10-12完了・archive済み。同一keyの明示asset列、active key数上限、retry/circuit/materializationとdependency/result orderingの整合を検証。 |
 | 9 | #2 | `add-available-materialization-aggregation` | 2026-10-12完了・archive済み。明示current/prior identityのavailable records、失敗を保った集約、単一atomic snapshot/receiptと停止点を検証。 |
-| 10 | #1 | `add-resource-execution-statistics` | Issue本文のresourceごとの実行・待機・retry統計。outcome queriesのnon-goalとして延期していた範囲を独立changeで扱う。 |
+| 10 | #1 | `add-resource-execution-statistics` | 2026-10-12完了・archive済み。actual invocationとretry、観測admission waitの集計・計測範囲、portable非変更を検証。 |
 
 executor、共有model、同じcapabilityのsync/archiveは直列ownerとする。
 adapterと専用tests、固定されたAPIに対するDocs・調査はfile ownershipを分離して並列化できる。

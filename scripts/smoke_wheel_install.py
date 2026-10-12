@@ -36,6 +36,8 @@ from kazeflow import (
     MaterializationRecord,
     OpenCircuit,
     ResourcePolicy,
+    ResourceStatistics,
+    Retry,
     RunResult,
 )
 from kazeflow.results import AttemptStatus, FlowStatus
@@ -258,6 +260,47 @@ assert query_result.circuit_skipped_partition_keys("query_partitions") == (
 )
 query_record_before = query_result.to_record(schema_version=3)
 assert query_result.failed_partition_keys("query_partitions")
+
+statistics_calls = 0
+
+@kazeflow.asset(
+    partition_def=DatePartitionDef(), resource="wheel-statistics"
+)
+def statistics_asset(context: AssetContext):
+    global statistics_calls
+    statistics_calls += 1
+    if statistics_calls == 1:
+        raise TimeoutError("temporary wheel smoke failure")
+    return context.partition_key.isoformat()
+
+def retry_statistics(error):
+    if isinstance(error, TimeoutError):
+        return Retry()
+    raise error
+
+statistics_flow = Flow(
+    ["statistics_asset"],
+    resources={
+        "wheel-statistics": ResourcePolicy(
+            1, max_attempts=2, classify_failure=retry_statistics
+        )
+    },
+)
+statistics_result = asyncio.run(
+    statistics_flow.run_async({"partition_keys": ["2026-08-14"]})
+)
+statistics = statistics_result.resource_statistics("wheel-statistics")
+assert isinstance(statistics, ResourceStatistics)
+assert (statistics.invocations, statistics.failed, statistics.succeeded) == (2, 1, 1)
+assert statistics.retries == 1
+empty_statistics_result = asyncio.run(
+    statistics_flow.run_async({"partition_keys": []})
+)
+empty_statistics = empty_statistics_result.resource_statistics("wheel-statistics")
+assert (empty_statistics.invocations, empty_statistics.retries) == (0, 0)
+assert empty_statistics.invocation_duration.total_seconds() == 0
+assert statistics_result.to_record() == statistics_result.to_record(schema_version=1)
+assert "resources" not in statistics_result.to_record(schema_version=4)
 assert query_result.to_record(schema_version=3) == query_record_before
 
 group_trace = []

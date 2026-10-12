@@ -37,6 +37,7 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
         "RunConfig",
         "RunResult",
         "ResourcePolicy",
+        "ResourceStatistics",
         "Retry",
         "run",
     ]

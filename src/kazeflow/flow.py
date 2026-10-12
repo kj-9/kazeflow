@@ -41,6 +41,7 @@ from .results import (
     TaskReference,
     TaskResult,
 )
+from .resource_statistics import ResourceStatistics
 from .resources import Fail, OpenCircuit, ResourcePolicy, Retry, _RateWindow
 
 
@@ -65,6 +66,32 @@ class _AttemptState:
     invocation_started_at: datetime | None = None
     invocation_started_monotonic: float | None = None
     invocations: tuple[InvocationResult, ...] = ()
+    resource_operation_started_at: float | None = None
+    resource_wait_started_at: float | None = None
+
+
+@dataclass(slots=True)
+class _ResourceCounters:
+    name: str
+    invocations: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    retries: int = 0
+    wait_count: int = 0
+    wait_seconds: float = 0.0
+    invocation_seconds: float = 0.0
+
+    def snapshot(self) -> ResourceStatistics:
+        return ResourceStatistics(
+            name=self.name,
+            invocations=self.invocations,
+            succeeded=self.succeeded,
+            failed=self.failed,
+            retries=self.retries,
+            wait_count=self.wait_count,
+            wait_duration=timedelta(seconds=self.wait_seconds),
+            invocation_duration=timedelta(seconds=self.invocation_seconds),
+        )
 
 
 class _BodyFailure(Exception):
@@ -287,6 +314,10 @@ class _Executor:
         self._policies = {
             resource.name: resources[resource.name] for resource in plan.resources
         }
+        self._statistics = {
+            resource.name: _ResourceCounters(resource.name)
+            for resource in plan.resources
+        }
         self._cooldowns: dict[str, float] = {}
         self._circuits: dict[str, AttemptReference] = {}
         self._resource_limits = {
@@ -346,7 +377,15 @@ class _Executor:
             else FlowStatus.SUCCESS
         )
         result = RunResult(
-            self.run_id, status, flow_started_at, ended_at, duration, completed_tasks
+            self.run_id,
+            status,
+            flow_started_at,
+            ended_at,
+            duration,
+            completed_tasks,
+            resources=tuple(
+                counter.snapshot() for counter in self._statistics.values()
+            ),
         )
         self._emit(EventKind.FLOW_FINISHED, status=status)
         validate_event_sequence(self.events)
@@ -425,17 +464,20 @@ class _Executor:
                     and self._resource_running.get(resource, 0)
                     >= self._resource_limits[resource]
                 ):
+                    self._mark_resource_wait(attempt, resource, now)
                     continue
                 window = (
                     self._rate_windows.get(resource) if resource is not None else None
                 )
                 ready_at = max(attempt.ready_at, self._cooldowns.get(resource, 0.0))
                 if window is not None and not window.ready(now):
+                    self._mark_resource_wait(attempt, resource, now)
                     deadline = window.deadline(now)
                     if deadline is not None:
                         self._wait_until(max(ready_at, deadline))
                     continue
                 if ready_at > now:
+                    self._mark_resource_wait(attempt, resource, now)
                     self._wait_until(ready_at)
                     continue
                 return task, attempt, None
@@ -474,6 +516,49 @@ class _Executor:
                 if task.result is None:
                     for attempt in task.attempts:
                         yield task, attempt
+
+    def _mark_resource_wait(
+        self, attempt: _AttemptState, resource: str | None, now: float
+    ) -> None:
+        if resource is not None and attempt.resource_wait_started_at is None:
+            attempt.resource_wait_started_at = now
+            self._statistics[resource].wait_count += 1
+
+    def _close_resource_wait(
+        self, attempt: _AttemptState, resource: str | None
+    ) -> None:
+        started = attempt.resource_wait_started_at
+        if resource is not None and started is not None:
+            self._statistics[resource].wait_seconds += max(
+                0.0, time.monotonic() - started
+            )
+            attempt.resource_wait_started_at = None
+
+    def _start_resource_operation(
+        self, attempt: _AttemptState, resource: str | None
+    ) -> None:
+        if resource is None:
+            return
+        self._close_resource_wait(attempt, resource)
+        attempt.resource_operation_started_at = time.monotonic()
+        counters = self._statistics[resource]
+        counters.invocations += 1
+        if attempt.invocation_number > 1:
+            counters.retries += 1
+
+    def _finish_resource_operation(
+        self, attempt: _AttemptState, resource: str | None, *, succeeded: bool
+    ) -> None:
+        started = attempt.resource_operation_started_at
+        if resource is None or started is None:
+            return
+        counters = self._statistics[resource]
+        counters.invocation_seconds += max(0.0, time.monotonic() - started)
+        if succeeded:
+            counters.succeeded += 1
+        else:
+            counters.failed += 1
+        attempt.resource_operation_started_at = None
 
     def _wait_until(self, deadline: float) -> None:
         self._rate_deadline = (
@@ -603,6 +688,7 @@ class _Executor:
             window.record_start(time.monotonic())
             if not self._admission_wakeup.done():
                 self._admission_wakeup.set_result(None)
+        self._start_resource_operation(attempt, resource)
         context.invocation_number = attempt.invocation_number
         try:
             output = await asset.invoke(context, inputs)
@@ -646,6 +732,7 @@ class _Executor:
         try:
             outcome = future.result()
         except Exception as error:
+            self._finish_resource_operation(attempt, resource, succeeded=False)
             body_failed = isinstance(error, _BodyFailure)
             original = error.error if isinstance(error, _BodyFailure) else error
             original_failure = _failure_info(original)
@@ -731,6 +818,7 @@ class _Executor:
             if isinstance(outcome, _PreparedInvocation):
                 attempt.prepared = outcome
                 return
+            self._finish_resource_operation(attempt, resource, succeeded=True)
             self._record_invocation(attempt, AttemptStatus.SUCCESS, ended_at)
             attempt.result = AttemptResult(
                 attempt.reference,
@@ -795,6 +883,7 @@ class _Executor:
     def _finish_blocked(
         self, task: _TaskState, attempt: _AttemptState, reason: SkipReason
     ) -> None:
+        self._close_resource_wait(attempt, task.plan.resource_name)
         if reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
             assert task.plan.resource_name is not None
             blockers = (self._circuits[task.plan.resource_name],)

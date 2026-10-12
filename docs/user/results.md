@@ -42,6 +42,31 @@ Materialization IDs are opaque, adapter-defined diagnostic strings. They may con
 application information and are not automatically redacted. Result inspection never
 uses an ID to load an artifact; it does not reconstruct raw keys or outputs.
 
+## Live resource statistics
+
+The live `RunResult` also exposes a `resources` tuple and an exact-name
+`resource_statistics(name)` lookup. Each immutable `ResourceStatistics` snapshot
+reports actual body-plus-commit operation starts and outcomes, retries that really
+started, and observed resource-admission wait episodes. Selected resources remain
+present with zero counters when no body starts, and each run starts with fresh
+counters. See the [API reference](api/plans-results.md#runresult) for the field
+definitions, lookup errors, and timing boundaries.
+
+Statistics are collected directly during execution, independently of optional
+invocation history. A body start counts as one invocation; a completed commit is
+included in that operation's success or failure and duration. Preparation, reused
+materializations, skips, and retries that never start a body are not counted.
+Admission waits start only when ready body work is actually observed being denied
+by a resource concurrency, rate, retry-delay, or cooldown rule. The observed interval
+ends at body start or terminal skip. It can include later scheduler delay, and
+intervals may overlap, so their sum is neither exclusive cause time nor flow wall
+clock time.
+
+The counters are available only from a live result. Portable record versions 1–4,
+events, CLI output, and SQLite records keep their existing shapes; old records cannot
+restore these summaries. See the
+[resource statistics example](https://github.com/kj-9/kazeflow/blob/main/examples/resource_statistics.py).
+
 ## Stored record boundary
 
 | Stored | Not stored |

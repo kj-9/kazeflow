@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased: Resource execution statistics
+
+- Live `RunResult` objects expose immutable `ResourceStatistics` snapshots through
+  `resources` and `resource_statistics(name)`. They summarize actual body/commit
+  operations, completed outcomes, retries that start, and observed resource
+  admission waits for the current run.
+- Wait summaries count intervals from the first observed resource-policy denial to
+  body start or terminal skip. Preparation and dependency waits, and global-only
+  queueing before resource admission is examined, are excluded. An open interval can
+  include later scheduler delay; summed durations may overlap and are not exclusive
+  cause time or total flow time.
+- Statistics are available only on live results. Portable record versions 1–4,
+  events, CLI output, and SQLite schemas remain unchanged; historical records cannot
+  reconstruct counters. Added a runnable retry example and installed-wheel smoke
+  coverage.
+
 ## Unreleased: Available materialization aggregation
 
 - Added optional `MaterializationCollection` and synchronous

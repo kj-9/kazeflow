@@ -22,6 +22,7 @@ from kazeflow.results import (
     TaskReference,
     TaskResult,
 )
+from kazeflow.resource_statistics import ResourceStatistics
 
 
 NOW = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
@@ -125,6 +126,7 @@ def test_exact_enums_fields_and_defaults() -> None:
         "ended_at",
         "duration",
         "tasks",
+        "resources",
     ]
     assert (
         inspect.signature(AttemptReference).parameters["partition_key_present"].default
@@ -136,6 +138,7 @@ def test_exact_enums_fields_and_defaults() -> None:
     assert inspect.signature(AttemptResult).parameters["blocked_by"].default == ()
     assert inspect.signature(TaskResult).parameters["attempts"].default == ()
     assert inspect.signature(RunResult).parameters["tasks"].default == ()
+    assert inspect.signature(RunResult).parameters["resources"].default == ()
     assert inspect.signature(AttemptResult).parameters["invocations"].default == ()
 
 
@@ -188,6 +191,56 @@ def test_invocation_history_is_validated_and_projected_only_in_version_two() -> 
     ]
     assert result.to_record(schema_version=3) == result.to_record(schema_version=2)
     assert "output" not in json.dumps(result.to_record(schema_version=2))
+
+
+def test_resource_statistics_are_appended_and_omitted_from_all_record_versions() -> (
+    None
+):
+    legacy = RunResult("legacy", FlowStatus.SUCCESS, NOW, LATER, DURATION, ())
+    stats = ResourceStatistics("warehouse", invocations=1, succeeded=1)
+    enriched = RunResult(
+        "legacy", FlowStatus.SUCCESS, NOW, LATER, DURATION, (), (stats,)
+    )
+
+    assert legacy.resources == ()
+    assert enriched.resource_statistics("warehouse") is stats
+    for version in (1, 2, 3, 4):
+        legacy_record = legacy.to_record(schema_version=version)
+        enriched_record = enriched.to_record(schema_version=version)
+        assert enriched_record == legacy_record
+        assert "resources" not in enriched_record
+
+
+def test_resource_statistics_lookup_errors_preserve_requested_name() -> None:
+    result = RunResult("run", FlowStatus.SUCCESS, NOW, LATER, DURATION)
+
+    with pytest.raises(TypeError, match="name must be a string"):
+        result.resource_statistics(None)  # type: ignore[arg-type]
+
+    for name in ("", "missing"):
+        with pytest.raises(KeyError) as error:
+            result.resource_statistics(name)
+        assert error.value.args == (name,)
+
+
+@pytest.mark.parametrize(
+    "resources",
+    [
+        [ResourceStatistics("a")],
+        (object(),),
+        (ResourceStatistics("a"), ResourceStatistics("a")),
+    ],
+)
+def test_run_result_validates_resource_tuple(resources) -> None:
+    with pytest.raises(ValueError, match="resources|unique"):
+        RunResult(
+            "run",
+            FlowStatus.SUCCESS,
+            NOW,
+            LATER,
+            DURATION,
+            resources=resources,
+        )
 
 
 @pytest.mark.parametrize("schema_version", [0, 5, True, "2"])

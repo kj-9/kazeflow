@@ -40,7 +40,8 @@ TaskResult(task: TaskReference, is_partitioned: bool, status: AttemptStatus,
            blocked_by: tuple[AttemptReference, ...] = ())
 RunResult(run_id: str, status: FlowStatus, started_at: datetime,
           ended_at: datetime, duration: timedelta,
-          tasks: tuple[TaskResult, ...] = ())
+          tasks: tuple[TaskResult, ...] = (),
+          resources: tuple[ResourceStatistics, ...] = ())
 ```
 
 `resolution` SHALL be `executed` or `materialized` for executor-produced successful attempts and `None` for other statuses. Manually constructed successful attempts MAY retain unknown resolution as `None` without an ID. `materialization_id` SHALL be a non-empty string for reused materialized successes and MAY also be present for executed successes with a completed commit. It SHALL be absent for ordinary successful attempts and non-success outcomes. IDs require a known resolution. Existing zero-argument and explicit version 1–3 projections SHALL retain their prior shapes; version 4 SHALL export these fields.
@@ -64,6 +65,12 @@ SHALL remain tuples and result envelopes SHALL not be structurally mutable.
 #### Scenario: A reused attempt is identifiable in memory
 - **WHEN** a committed materialization supplies a successful attempt's output
 - **THEN** that attempt's in-memory resolution is `materialized` and it has a committed materialization identifier while its historical portable projections retain their existing shapes and version 4 reports this metadata
+
+`RunResult.resources` SHALL be a tuple of immutable ResourceStatistics snapshots as defined by the resource-execution-statistics capability, defaulting empty without reconstructing absent historical metadata. Existing result projection versions1–4 SHALL omit this field.
+
+#### Scenario: Live resource metadata preserves historical result shape
+- **WHEN** a completed result includes resource summaries
+- **THEN** the live tuple and exact-name lookup expose them while portable versions1–4 retain their prior shapes
 
 ### Requirement: Result snapshots are completed, time-valid terminal outcomes
 `AttemptResult` and `TaskResult` SHALL accept only terminal `AttemptStatus` values:

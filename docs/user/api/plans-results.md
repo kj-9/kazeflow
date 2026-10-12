@@ -18,6 +18,35 @@ continue to govern invocations separately. See [partition groups](../partitions.
 
 ::: kazeflow.RunResult
 
+`RunResult.resources` contains immutable `ResourceStatistics` snapshots for the
+named resources selected by this plan, in plan order. Use
+`result.resource_statistics(name)` for exact lookup. A non-string name raises
+`TypeError`; an unknown or empty name raises `KeyError`. Historical or manually
+constructed results without live summaries do not invent statistics.
+
+`invocations` counts actual starts of an asset body-plus-commit operation.
+`succeeded` and `failed` count its completed outcome, and `invocation_duration`
+adds monotonic elapsed time through commit. `retries` counts a subsequent body
+invocation only when it actually starts. Preparation failures, materialization
+reuse, skips, and retry decisions that never start another body do not add an
+invocation or retry. Selected resources with no body starts still appear with
+zero counters. Counters belong to one run and are not process-wide totals.
+
+`wait_count` and `wait_duration` describe observed resource-admission episodes.
+An episode starts when otherwise eligible body work is checked and denied by
+resource concurrency, rolling rate limit, retry delay, or resource cooldown. It
+ends at body start or terminal skip; repeated checks during one episode count
+once. Dependency and preparation waits, and global-only queue time before
+resource admission is examined, are not measured. Once an episode starts, its
+duration may include later scheduler or global delay. Durations are summed across
+operations, may overlap, and do not measure exclusive time for one cause or total
+flow wall-clock time.
+
+These summaries exist only on the live `RunResult`. They do not change record
+versions 1–4, event projections, CLI or SQLite schemas. A historical record cannot
+reconstruct statistics that were not recorded. See the
+[resource statistics example](https://github.com/kj-9/kazeflow/blob/main/examples/resource_statistics.py).
+
 ## `InvocationResult`
 
 ::: kazeflow.InvocationResult

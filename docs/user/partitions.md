@@ -163,6 +163,15 @@ resume occurs.
 
 See the [runnable partition outcome example](https://github.com/kj-9/kazeflow/blob/main/examples/partition_outcomes.py).
 
+Resource statistics are a separate, run-level summary. `RunResult.resources`
+aggregates body/commit operations and observed resource-admission waits by selected
+resource; it does not report a counter for each partition key. Wait timing begins
+only after ready body work is observed being denied by a resource policy, so it
+does not include dependency delay or global-only queueing that happens before that
+check. An observed interval can include later scheduler delay, and wait durations
+may overlap. See the [resource statistics API reference](api/plans-results.md#runresult)
+and [example](https://github.com/kj-9/kazeflow/blob/main/examples/resource_statistics.py).
+
 ## Keep the portable boundary in mind
 
 The portable **plan** JSON reports selection kind, domain, and safe counts. Portable

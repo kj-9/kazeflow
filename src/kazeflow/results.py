@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 
+from kazeflow.resource_statistics import ResourceStatistics
+
 
 class FlowStatus(str, Enum):
     PENDING = "pending"
@@ -481,6 +483,7 @@ class RunResult:
     ended_at: datetime
     duration: timedelta
     tasks: tuple[TaskResult, ...] = ()
+    resources: tuple[ResourceStatistics, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or not self.run_id:
@@ -495,6 +498,16 @@ class RunResult:
             isinstance(task, TaskResult) for task in self.tasks
         ):
             raise ValueError("tasks must be a tuple of TaskResult values")
+        if not isinstance(self.resources, tuple) or not all(
+            isinstance(resource, ResourceStatistics) for resource in self.resources
+        ):
+            raise ValueError("resources must be a tuple of ResourceStatistics values")
+
+        resource_names: set[str] = set()
+        for resource in self.resources:
+            if resource.name in resource_names:
+                raise ValueError("run resources must have unique names")
+            resource_names.add(resource.name)
 
         task_names: set[str] = set()
         for task in self.tasks:
@@ -549,6 +562,19 @@ class RunResult:
             if attempt.status is AttemptStatus.SKIPPED
             and attempt.reason is SkipReason.RESOURCE_CIRCUIT_OPEN
         )
+
+    def resource_statistics(self, name: str) -> ResourceStatistics:
+        """Return the live statistics snapshot for an exact resource name.
+
+        Manually constructed and historical results have no inferred statistics.
+        Raises TypeError for non-string names and KeyError when no snapshot exists.
+        """
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+        for resource in self.resources:
+            if resource.name == name:
+                return resource
+        raise KeyError(name)
 
     def to_record(self, *, schema_version: int = 1) -> dict[str, object]:
         _validate_record_version(schema_version)
