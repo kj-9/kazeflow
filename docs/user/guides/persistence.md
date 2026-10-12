@@ -42,3 +42,10 @@ ID without contacting the adapter or loading the artifact.
 
 See [Results and history](../results.md) for the record model and
 [SQLiteRunStore](../api/sqlite.md) for the direct Python API.
+
+SQLite run history and file materialization storage are separate. Saving or deleting
+a run record does not commit, invalidate, or remove an asset output. If an application
+uses `FileMaterialization`, its output generations and revocation ledger live under
+the explicitly configured materialization root; see
+[partition materialization and invalidation](../partitions.md#invalidate-one-materialization-explicitly).
+Treat both the SQLite database and the materialization root as application data.

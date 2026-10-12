@@ -43,6 +43,26 @@
 - Added a three-process example that commits a producer output, fails downstream,
   then retries downstream while reusing the producer output.
 
+## Unreleased: Explicit materialization invalidation
+
+- Added the optional `MaterializationInvalidation` protocol and
+  `FileMaterialization.invalidate(context, reason=...)` for explicit revocation of
+  one exact identity. Existing resolve/load/commit adapters remain compatible, and
+  invalidation is never automatic.
+- Added non-mutating `FileMaterialization.inspect(context)` diagnostics with
+  `available`, `missing`, `invalidated`, `incompatible`, and `corrupt` statuses.
+- File references and manifests now use schema version 2 and carry revocation epochs;
+  updated readers can read version 1 while no revocation ledger exists. Stop older
+  writers before adopting the new format because older releases cannot read version 2.
+- Revocation is retained by copying the entire store, including its ledger, and blocks
+  restoration of old references and objects while that ledger remains intact. Full
+  root rollback and ledger deletion are outside this guarantee. Invalidation requires
+  quiescent users, does not lock processes, cascade, delete artifacts, or garbage
+  collect them.
+- Invalidation reasons are stored as ordinary application metadata without automatic
+  redaction. Added an example and installed-wheel smoke coverage for commit,
+  invalidation, explicit rebuild, and subsequent reuse.
+
 ## Unreleased: Flow-scoped resource limits
 
 - `Flow` can declare named `ResourcePolicy` limits for simultaneous invocations

@@ -200,6 +200,32 @@ can also be run twice with the same store root. It prints the successful result 
 attempt-finished event in portable v4 form, showing `executed` with the committed ID
 first and `materialized` with that ID on the next invocation.
 
+### Invalidate one materialization explicitly
+
+`FileMaterialization.invalidate(context, reason="...")` revokes one exact identity:
+asset name and version, partition domain, typed key and its presence, and the ordered
+direct input materialization IDs. It does not cascade to downstream assets or delete
+the stored generations. Repeating invalidation creates a fresh revocation epoch.
+The optional `MaterializationInvalidation` protocol describes this operation; existing
+adapters that only implement resolve/load/commit remain usable. Invalidation is never
+performed automatically.
+
+Quiesce all users of that identity before invalidating it. The adapter does not lock
+across processes or coordinate a concurrent run with invalidation. After invalidation,
+explicitly select the partition in a new run to rebuild it. A successful commit in the
+new epoch is reusable by later runs. No run is resumed and no partition is selected
+automatically.
+
+Use `FileMaterialization.inspect(context)` to diagnose stored state without running an
+asset or decoding its output. It reports `available`, `missing`, `invalidated`,
+`incompatible`, or `corrupt`. Only `available` includes a committed record. Inspection
+does not mutate the store.
+
+The runnable
+[invalidation example](https://github.com/kj-9/kazeflow/blob/main/examples/materialization_invalidation.py)
+commits an output, invalidates its identity, explicitly runs that partition again, and
+then confirms that the new generation is reused.
+
 ### Storage and compatibility boundary
 
 The adapter owns storage policy. `FileMaterialization` uses an explicit codec and a
@@ -221,9 +247,18 @@ Committed data is published by replacing a small reference to an immutable
 generation. Atomic rename provides visibility on a local filesystem; power-loss
 durability and network filesystem semantics are not guaranteed. Multiple writers
 may race, and the last reference replacement wins. Previous generations are kept;
-there is no cleanup, invalidation, or garbage collection. Synchronous storage calls
-run in worker threads, so cancelling a flow cannot stop a call already in progress;
-an atomic commit may finish and be available to a later process.
+there is no artifact deletion or garbage collection. Explicit invalidation writes a
+separate revocation ledger and leaves generations in place.
+
+New references and manifests use schema version 2. Updated readers also accept
+version 1 when no revocation ledger exists for that identity. Older package versions
+cannot read version 2, so stop older writers and upgrade all processes before writing
+new records. Copy the complete store root, including its `invalidations/` directory,
+to preserve revocation. Restoring only old references and objects while retaining the
+current ledger does not revive them. Deleting or restoring old revocation metadata,
+including rolling back the whole root, is outside this guarantee. Synchronous storage
+calls run in worker threads, so cancelling a flow cannot stop a call already in
+progress; an atomic commit may finish and be available to a later process.
 
 The adapter adds no third-party runtime dependency and is opt-in. It does not
 provide cross-run exactly-once execution or an external-sink transaction guarantee.

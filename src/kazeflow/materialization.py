@@ -116,6 +116,21 @@ class MaterializationRecord:
             raise ValueError("committed must be a bool")
 
 
+class MaterializationInvalidation(Protocol):
+    """Optional, caller-driven revocation capability for an exact identity.
+
+    Existing resolve/load/commit adapters need not implement this protocol.
+    Callers coordinate storage users before invalidation; execution never invokes
+    it automatically. The adapter owns persistence of the revocation decision.
+    """
+
+    def invalidate(
+        self, context: MaterializationContext, *, reason: str = "explicit"
+    ) -> None | Awaitable[None]:
+        """Revoke prior generations for this identity without deleting outputs."""
+        ...
+
+
 class Materialization(Protocol):
     """User supplied storage adapter for materialized asset outputs."""
 

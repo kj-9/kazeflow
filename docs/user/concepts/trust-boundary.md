@@ -22,6 +22,16 @@ unchanged between resolution and load. The adapter decides how raw partition key
 and outputs are encoded, validated, stored, and protected. Use an adapter whose
 storage behavior fits the data and concurrency risks of the application.
 
+`FileMaterialization.invalidate` is an explicit application operation. Quiesce users
+of the exact identity before calling it; it provides no cross-process locking. Its
+non-empty `reason` is stored as plain application metadata in the revocation ledger.
+Do not put secrets or personal data in that reason. Copy the full root, including the
+ledger, to retain revocation when moving a store. Restoring/deleting the ledger or
+rolling back the entire root can remove that decision, so it is outside the stale
+artifact restoration guarantee. Invalidation does not delete output generations or
+cascade to dependent identities. See the
+[partition invalidation guide](../partitions.md#invalidate-one-materialization-explicitly).
+
 ## Portable-record boundary
 
 `RunResult.to_record()`, CLI JSON, and SQLite storage deliberately omit arbitrary

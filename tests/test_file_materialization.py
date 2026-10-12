@@ -228,6 +228,114 @@ def test_copied_root_is_portable_to_a_fresh_process(tmp_path: Path) -> None:
     }
 
 
+def test_new_files_use_epoch_schema_and_inspection_is_available(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "store"
+    store = adapter(root)
+    ctx = context()
+    record = store.commit(ctx, {"answer": 42})
+    reference = json.loads(refs(root)[0].read_text(encoding="utf-8"))
+    manifest_path = generation(root, record.materialization_id) / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert reference == {
+        "schema_version": 2,
+        "materialization_id": record.materialization_id,
+        "epoch": None,
+    }
+    assert manifest["schema_version"] == 2
+    assert manifest["epoch"] is None
+    inspection = store.inspect(ctx)
+    assert inspection.status == "available"
+    assert inspection.record == record
+    assert inspection.reason is None
+
+
+def test_legacy_reference_and_manifest_remain_readable(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    store = adapter(root)
+    ctx = context()
+    record = store.commit(ctx, {"legacy": True})
+    reference_path = refs(root)[0]
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    reference.pop("epoch")
+    reference["schema_version"] = 1
+    reference_path.write_text(json.dumps(reference), encoding="utf-8")
+    manifest_path = generation(root, record.materialization_id) / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("epoch")
+    manifest["schema_version"] = 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert store.resolve(ctx) == record
+    assert store.load(record) == {"legacy": True}
+    assert store.inspect(ctx).status == "available"
+
+
+def test_null_epoch_ledger_fails_closed(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    store = adapter(root)
+    ctx = context()
+    record = store.commit(ctx, "previous")
+    ledger_dir = root / "invalidations"
+    ledger_dir.mkdir()
+    digest = Path(refs(root)[0]).stem
+    (ledger_dir / f"{digest}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "identity": {
+                    "asset_name": "transform",
+                    "version": "v1",
+                    "partition_domain": "tenant",
+                    "partition_key_present": True,
+                    "partition_key": {"type": "str", "value": "acme"},
+                    "input_materialization_ids": [["source", "source-id"]],
+                },
+                "epoch": None,
+                "reason": "manual",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FileMaterializationError) as error:
+        store.resolve(ctx)
+    assert isinstance(error.value, FileMaterializationError)
+    assert error.value.reason == "corrupt"
+    with pytest.raises(FileMaterializationError) as load_error:
+        store.load(record)
+    assert isinstance(load_error.value, FileMaterializationError)
+    assert load_error.value.reason == "corrupt"
+    assert store.inspect(ctx).status == "corrupt"
+
+
+def test_dangling_ledger_and_reference_are_corrupt_not_missing(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "store"
+    store = adapter(root)
+    ctx = context()
+    store.commit(ctx, "output")
+    ledger_dir = root / "invalidations"
+    ledger_dir.mkdir()
+    ref_path = refs(root)[0]
+    ledger_path = ledger_dir / f"{ref_path.stem}.json"
+    ledger_path.symlink_to(ledger_dir / "absent-ledger.json")
+
+    with pytest.raises(FileMaterializationError):
+        store.resolve(ctx)
+    assert store.inspect(ctx).status == "corrupt"
+
+    ledger_path.unlink()
+    ref_path.unlink()
+    ref_path.symlink_to(root / "refs" / "absent-reference.json")
+    with pytest.raises(FileMaterializationError):
+        store.resolve(ctx)
+    assert store.inspect(ctx).status == "corrupt"
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

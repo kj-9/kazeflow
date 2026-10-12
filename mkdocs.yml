@@ -115,6 +115,7 @@ nav:
       - Core API: api/core.md
       - Plans and results: api/plans-results.md
       - Events: api/events.md
+      - Materialization contracts: api/materialization.md
       - File materialization: api/file-materialization.md
       - SQLite adapter: api/sqlite.md
   - Examples:

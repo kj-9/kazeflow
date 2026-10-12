@@ -4,6 +4,7 @@ from .flow import Flow, RunConfig, run
 from .materialization import (
     Materialization,
     MaterializationContext,
+    MaterializationInvalidation,
     MaterializationRecord,
 )
 from .partition import DatePartitionDef, PartitionDef
@@ -32,6 +33,7 @@ __all__ = [
     "InvocationResult",
     "Materialization",
     "MaterializationContext",
+    "MaterializationInvalidation",
     "MaterializationRecord",
     "OpenCircuit",
     "PartitionDef",

@@ -30,6 +30,7 @@ from kazeflow import (
     FlowPlan,
     Materialization,
     MaterializationContext,
+    MaterializationInvalidation,
     MaterializationRecord,
     OpenCircuit,
     ResourcePolicy,
@@ -47,6 +48,7 @@ side_effects = []
 assert Materialization is not None
 assert MaterializationContext is not None
 assert MaterializationRecord is not None
+assert MaterializationInvalidation is not None
 assert MaterializationCodec is not None
 assert FileMaterializationError is not None
 
@@ -144,6 +146,55 @@ with tempfile.TemporaryDirectory(prefix="kazeflow-provenance-") as temporary:
         first_finish.to_record()["materialization_id"]
         == second_finish.to_record()["materialization_id"]
     )
+
+
+with tempfile.TemporaryDirectory(prefix="kazeflow-invalidation-") as temporary:
+    invalidation_store = FileMaterialization(
+        Path(temporary) / "store", codec=JsonCodec()
+    )
+    invalidation_partition = DatePartitionDef()
+    invalidation_key = date(2026, 10, 12)
+    invalidation_calls = []
+
+    @kazeflow.asset(
+        partition_def=invalidation_partition,
+        materialization=invalidation_store,
+        version="wheel-invalidation-v1",
+    )
+    def invalidation_asset(context: AssetContext):
+        invalidation_calls.append(context.partition_key)
+        return {"day": context.partition_key.isoformat()}
+
+    invalidation_flow = Flow(["invalidation_asset"])
+    invalidation_config = {"partition_keys": [invalidation_key]}
+    invalidation_context = MaterializationContext(
+        asset_name="invalidation_asset",
+        version="wheel-invalidation-v1",
+        partition_domain=invalidation_partition.domain,
+        partition_key_present=True,
+        partition_key=invalidation_key,
+    )
+    before_invalidation = asyncio.run(
+        invalidation_flow.run_async(invalidation_config)
+    )
+    old_id = before_invalidation.tasks[0].attempts[0].materialization_id
+    assert old_id
+    assert invalidation_store.inspect(invalidation_context).status == "available"
+    invalidation_store.invalidate(
+        invalidation_context, reason="wheel smoke correction"
+    )
+    assert invalidation_store.inspect(invalidation_context).status == "invalidated"
+
+    rebuilt = asyncio.run(invalidation_flow.run_async(invalidation_config))
+    rebuilt_attempt = rebuilt.tasks[0].attempts[0]
+    assert rebuilt_attempt.resolution == "executed"
+    new_id = rebuilt_attempt.materialization_id
+    assert new_id and new_id != old_id
+    reused = asyncio.run(invalidation_flow.run_async(invalidation_config))
+    reused_attempt = reused.tasks[0].attempts[0]
+    assert reused_attempt.resolution == "materialized"
+    assert reused_attempt.materialization_id == new_id
+    assert len(invalidation_calls) == 2
 
 
 @kazeflow.asset

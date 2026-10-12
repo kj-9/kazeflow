@@ -7,6 +7,7 @@ and how their bytes are produced.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import math
@@ -23,6 +24,10 @@ from kazeflow.materialization import MaterializationContext, MaterializationReco
 
 class FileMaterializationError(Exception):
     """A stored reference or generation is malformed, incompatible, or damaged."""
+
+    def __init__(self, *args: object, reason: str = "corrupt") -> None:
+        super().__init__(*args)
+        self.reason = reason
 
 
 class MaterializationCodec(Protocol):
@@ -133,6 +138,7 @@ def _validate_json_value(value: Any, active: set[int]) -> None:
 _HEX_ID = re.compile(r"^[0-9a-f]{32}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REF_FIELDS = {"schema_version", "materialization_id"}
+_REF_FIELDS_V2 = _REF_FIELDS | {"epoch"}
 _MANIFEST_FIELDS = {
     "schema_version",
     "materialization_id",
@@ -141,13 +147,51 @@ _MANIFEST_FIELDS = {
     "payload_size",
     "payload_sha256",
 }
+_MANIFEST_FIELDS_V2 = _MANIFEST_FIELDS | {"epoch"}
+_LEDGER_FIELDS = {"schema_version", "identity", "epoch", "reason"}
+
+
+@dataclass(frozen=True, slots=True)
+class FileMaterializationInspection:
+    """Read-only diagnosis of one exact file materialization identity."""
+
+    status: str
+    record: MaterializationRecord | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "available",
+            "missing",
+            "invalidated",
+            "incompatible",
+            "corrupt",
+        }:
+            raise ValueError("inspection status is invalid")
+        if self.status == "available":
+            if (
+                not isinstance(self.record, MaterializationRecord)
+                or self.record.committed is not True
+            ):
+                raise ValueError("available inspection requires a committed record")
+            if self.reason is not None:
+                raise ValueError("available inspection cannot have a reason")
+        else:
+            if self.record is not None:
+                raise ValueError("non-available inspection cannot have a record")
+            if self.status == "missing":
+                if self.reason is not None:
+                    raise ValueError("missing inspection cannot have a reason")
+            elif type(self.reason) is not str or not self.reason:
+                raise ValueError("inspection diagnosis requires a reason")
 
 
 class FileMaterialization:
     """Store immutable generations under a local root with atomic references.
 
     ``root`` is trusted local application storage. A missing root is treated as
-    a cache miss by :meth:`resolve`; only :meth:`commit` creates directories.
+    a cache miss by :meth:`resolve`; :meth:`commit` and :meth:`invalidate` may
+    create directories when explicitly called.
     """
 
     def __init__(self, root: str | Path, *, codec: MaterializationCodec) -> None:
@@ -167,61 +211,96 @@ class FileMaterialization:
     def resolve(self, context: MaterializationContext) -> MaterializationRecord | None:
         """Resolve and validate the currently published generation, if any."""
         identity = _identity(context)
-        reference_path = self._reference_path(identity)
-        try:
-            reference_path.lstat()
-        except FileNotFoundError:
+        inspection = self._inspect(context, identity)
+        if inspection.status in ("missing", "invalidated"):
             return None
-        except OSError as exc:
+        if inspection.status in ("corrupt", "incompatible"):
             raise FileMaterializationError(
-                "could not inspect materialization reference"
-            ) from exc
-        try:
-            raw_reference = reference_path.read_bytes()
-        except FileNotFoundError:
-            raise FileMaterializationError(
-                "materialization reference disappeared while reading"
+                inspection.reason or "materialization is unavailable",
+                reason=inspection.status,
             )
-        except OSError as exc:
-            raise FileMaterializationError(
-                "could not read materialization reference"
-            ) from exc
+        return inspection.record
 
+    def inspect(self, context: MaterializationContext) -> FileMaterializationInspection:
+        """Inspect one identity without writing or decoding its output."""
+        identity = _identity(context)
+        return self._inspect(context, identity)
+
+    def _inspect(
+        self, context: MaterializationContext, identity: dict[str, Any]
+    ) -> FileMaterializationInspection:
         try:
-            reference = _strict_json_document(raw_reference, "reference")
-            if set(reference) != _REF_FIELDS:
-                raise FileMaterializationError("reference has unexpected fields")
-            if type(reference["schema_version"]) is not int:
+            ledger = self._read_ledger(identity)
+            epoch = ledger["epoch"] if ledger is not None else None
+            ledger_reason = ledger["reason"] if ledger is not None else None
+            reference_path = self._reference_path(identity)
+            try:
+                reference_path.lstat()
+            except FileNotFoundError:
+                if ledger is not None:
+                    return FileMaterializationInspection(
+                        "invalidated", reason=ledger_reason
+                    )
+                return FileMaterializationInspection("missing")
+            except OSError as exc:
                 raise FileMaterializationError(
-                    "reference schema_version must be an integer"
+                    "could not inspect materialization reference"
+                ) from exc
+            try:
+                raw_reference = reference_path.read_bytes()
+            except FileNotFoundError:
+                raise FileMaterializationError(
+                    "materialization reference disappeared while reading"
                 )
-            if reference["schema_version"] != 1:
-                raise FileMaterializationError("unsupported reference schema version")
-            materialization_id = reference["materialization_id"]
+            except OSError as exc:
+                raise FileMaterializationError(
+                    "could not read materialization reference"
+                ) from exc
+
+            reference = _strict_json_document(raw_reference, "reference")
+            reference_schema = _require_schema(
+                reference, {1: _REF_FIELDS, 2: _REF_FIELDS_V2}, "reference"
+            )
+            materialization_id = reference.get("materialization_id")
             if type(materialization_id) is not str or not _HEX_ID.fullmatch(
                 materialization_id
             ):
                 raise FileMaterializationError(
                     "reference has an invalid materialization ID"
                 )
-            manifest, _payload = self._read_generation(materialization_id)
+            reference_epoch = (
+                _validate_epoch(reference["epoch"], "reference")
+                if reference_schema == 2
+                else None
+            )
+            if reference_epoch != epoch:
+                return FileMaterializationInspection(
+                    "invalidated", reason=ledger_reason or "invalidated"
+                )
+            manifest = self._read_manifest(materialization_id)
+            manifest_schema = manifest["schema_version"]
+            manifest_epoch = manifest["epoch"] if manifest_schema == 2 else None
+            if manifest_epoch != reference_epoch:
+                raise FileMaterializationError(
+                    "reference and manifest epochs do not match"
+                )
             stored_identity = _validate_stored_identity(manifest["identity"])
             if _canonical_json(stored_identity) != _canonical_json(identity):
                 raise FileMaterializationError(
                     "manifest identity does not match reference"
                 )
             if manifest["codec_id"] != self._codec_id:
-                raise FileMaterializationError("materialization codec does not match")
+                raise FileMaterializationError(
+                    "materialization codec does not match", reason="incompatible"
+                )
+            self._read_generation(materialization_id)
             record = _record_from_identity(materialization_id, context)
-            if not record.committed:
-                raise FileMaterializationError("resolved generation is not committed")
-            return record
-        except FileMaterializationError:
-            raise
-        except (OSError, KeyError, TypeError, ValueError) as exc:
-            raise FileMaterializationError(
-                "materialization reference is malformed"
-            ) from exc
+            return FileMaterializationInspection("available", record=record)
+        except FileMaterializationError as exc:
+            return FileMaterializationInspection(exc.reason, reason=str(exc))
+        except (OSError, KeyError, TypeError, ValueError):
+            error = FileMaterializationError("materialization reference is malformed")
+            return FileMaterializationInspection(error.reason, reason=str(error))
 
     def load(self, record: MaterializationRecord) -> Any:
         """Verify an immutable generation and decode its payload."""
@@ -241,7 +320,18 @@ class FileMaterialization:
             materialization_id
         ):
             raise FileMaterializationError("record has an invalid materialization ID")
+        ledger = self._read_ledger(identity)
+        current_epoch = ledger["epoch"] if ledger is not None else None
         try:
+            manifest_only = self._read_manifest(materialization_id)
+            manifest_epoch = (
+                manifest_only["epoch"] if manifest_only["schema_version"] == 2 else None
+            )
+            if manifest_epoch != current_epoch:
+                raise FileMaterializationError(
+                    "materialization record was invalidated",
+                    reason="invalidated",
+                )
             manifest, payload = self._read_generation(materialization_id)
         except FileMaterializationError:
             raise
@@ -253,7 +343,9 @@ class FileMaterialization:
         if _canonical_json(stored_identity) != _canonical_json(identity):
             raise FileMaterializationError("record identity does not match generation")
         if manifest["codec_id"] != self._codec_id:
-            raise FileMaterializationError("materialization codec does not match")
+            raise FileMaterializationError(
+                "materialization codec does not match", reason="incompatible"
+            )
         # Codec errors are intentionally preserved as the asset attempt failure.
         return self.codec.decode(payload)
 
@@ -262,6 +354,8 @@ class FileMaterialization:
     ) -> MaterializationRecord:
         """Write a complete immutable generation and atomically publish its ref."""
         identity = _identity(context)
+        ledger = self._read_ledger(identity)
+        epoch = ledger["epoch"] if ledger is not None else None
         payload = self.codec.encode(output)
         if type(payload) is not bytes:
             raise TypeError("materialization codec encode() must return bytes")
@@ -269,12 +363,13 @@ class FileMaterialization:
         materialization_id = uuid.uuid4().hex
         record = _record_from_identity(materialization_id, context)
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "materialization_id": materialization_id,
             "identity": identity,
             "codec_id": self._codec_id,
             "payload_size": len(payload),
             "payload_sha256": hashlib.sha256(payload).hexdigest(),
+            "epoch": epoch,
         }
         objects_path = self.root / "objects"
         refs_path = self.root / "refs"
@@ -292,7 +387,11 @@ class FileMaterialization:
             os.replace(generation_temp, generation_path)
             generation_temp = None
 
-            reference = {"schema_version": 1, "materialization_id": materialization_id}
+            reference = {
+                "schema_version": 2,
+                "materialization_id": materialization_id,
+                "epoch": epoch,
+            }
             reference_fd, reference_name = tempfile.mkstemp(
                 prefix=".reference-", dir=refs_path
             )
@@ -309,48 +408,120 @@ class FileMaterialization:
                 raise
             raise FileMaterializationError("could not publish materialization") from exc
 
+    def invalidate(
+        self, context: MaterializationContext, *, reason: str = "explicit"
+    ) -> None:
+        """Persist a fresh revocation epoch for one exact identity."""
+        identity = _identity(context)
+        if type(reason) is not str or not reason:
+            raise ValueError("reason must be a non-empty string")
+        document = {
+            "schema_version": 1,
+            "identity": identity,
+            "epoch": uuid.uuid4().hex,
+            "reason": reason,
+        }
+        invalidations_path = self.root / "invalidations"
+        temporary: Path | None = None
+        try:
+            # Validate an existing ledger before replacing it, failing closed.
+            self._read_ledger(identity)
+            invalidations_path.mkdir(parents=True, exist_ok=True)
+            fd, name = tempfile.mkstemp(prefix=".invalidation-", dir=invalidations_path)
+            temporary = Path(name)
+            os.close(fd)
+            _write_synced(temporary, _canonical_json(document), existing=True)
+            os.replace(temporary, self._ledger_path(identity))
+            temporary = None
+        except Exception as exc:
+            _remove_path(temporary)
+            if isinstance(exc, FileMaterializationError):
+                raise
+            raise FileMaterializationError(
+                "could not publish materialization invalidation"
+            ) from exc
+
     def _reference_path(self, identity: dict[str, Any]) -> Path:
         digest = hashlib.sha256(_canonical_json(identity)).hexdigest()
         return self.root / "refs" / f"{digest}.json"
 
-    def _read_generation(self, materialization_id: str) -> tuple[dict[str, Any], bytes]:
+    def _ledger_path(self, identity: dict[str, Any]) -> Path:
+        digest = hashlib.sha256(_canonical_json(identity)).hexdigest()
+        return self.root / "invalidations" / f"{digest}.json"
+
+    def _read_ledger(self, identity: dict[str, Any]) -> dict[str, Any] | None:
+        # A dangling parent must not erase revocation evidence as a cache miss.
+        parent = self.root / "invalidations"
+        try:
+            parent.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise FileMaterializationError(
+                "could not inspect invalidation directory"
+            ) from exc
+        if not parent.is_dir():
+            raise FileMaterializationError("invalidation directory is unreadable")
+        path = self._ledger_path(identity)
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise FileMaterializationError(
+                "could not read invalidation ledger"
+            ) from exc
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise FileMaterializationError(
+                "could not read invalidation ledger"
+            ) from exc
+        ledger = _strict_json_document(raw, "invalidation ledger")
+        if set(ledger) != _LEDGER_FIELDS:
+            raise FileMaterializationError("invalidation ledger has unexpected fields")
+        if type(ledger["schema_version"]) is not int:
+            raise FileMaterializationError(
+                "invalidation ledger schema_version must be an integer"
+            )
+        if ledger["schema_version"] != 1:
+            raise FileMaterializationError(
+                "unsupported invalidation ledger schema version",
+                reason="incompatible",
+            )
+        stored_identity = _validate_stored_identity(ledger["identity"])
+        if _canonical_json(stored_identity) != _canonical_json(identity):
+            raise FileMaterializationError(
+                "invalidation ledger identity does not match"
+            )
+        if _validate_epoch(ledger["epoch"], "invalidation ledger") is None:
+            raise FileMaterializationError("invalidation ledger epoch is missing")
+        if type(ledger["reason"]) is not str or not ledger["reason"]:
+            raise FileMaterializationError("invalidation ledger reason is malformed")
+        return ledger
+
+    def _read_manifest(self, materialization_id: str) -> dict[str, Any]:
         generation = self.root / "objects" / materialization_id
         try:
             manifest = _strict_json_document(
                 (generation / "manifest.json").read_bytes(), "manifest"
             )
-            if set(manifest) != _MANIFEST_FIELDS:
-                raise FileMaterializationError("manifest has unexpected fields")
-            if type(manifest["schema_version"]) is not int:
-                raise FileMaterializationError(
-                    "manifest schema_version must be an integer"
-                )
-            if manifest["schema_version"] != 1:
-                raise FileMaterializationError("unsupported manifest schema version")
-            if manifest["materialization_id"] != materialization_id:
-                raise FileMaterializationError(
-                    "manifest materialization ID does not match"
-                )
-            if type(manifest["identity"]) is not dict:
-                raise FileMaterializationError("manifest identity must be an object")
-            if type(manifest["codec_id"]) is not str or not manifest["codec_id"]:
-                raise FileMaterializationError(
-                    "manifest codec_id must be a non-empty string"
-                )
-            if (
-                type(manifest["payload_size"]) is not int
-                or manifest["payload_size"] < 0
-            ):
-                raise FileMaterializationError(
-                    "manifest payload_size must be non-negative"
-                )
-            payload_sha256 = manifest["payload_sha256"]
-            if type(payload_sha256) is not str or not _SHA256.fullmatch(payload_sha256):
-                raise FileMaterializationError("manifest payload digest is malformed")
+            return _validate_manifest(manifest, materialization_id)
+        except FileMaterializationError:
+            raise
+        except OSError:
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FileMaterializationError("manifest is malformed") from exc
+
+    def _read_generation(self, materialization_id: str) -> tuple[dict[str, Any], bytes]:
+        generation = self.root / "objects" / materialization_id
+        try:
+            manifest = self._read_manifest(materialization_id)
             payload = (generation / "payload.bin").read_bytes()
             if len(payload) != manifest["payload_size"]:
                 raise FileMaterializationError("payload size does not match manifest")
-            if hashlib.sha256(payload).hexdigest() != payload_sha256:
+            if hashlib.sha256(payload).hexdigest() != manifest["payload_sha256"]:
                 raise FileMaterializationError("payload digest does not match manifest")
             return manifest, payload
         except FileMaterializationError:
@@ -570,6 +741,52 @@ def _strict_json_document(raw: bytes, label: str) -> dict[str, Any]:
     if type(parsed) is not dict:
         raise FileMaterializationError(f"{label} must be a JSON object")
     return parsed
+
+
+def _require_schema(
+    document: dict[str, Any], schemas: dict[int, set[str]], label: str
+) -> int:
+    schema_version = document.get("schema_version")
+    if type(schema_version) is not int:
+        raise FileMaterializationError(f"{label} schema_version must be an integer")
+    expected_fields = schemas.get(schema_version)
+    if expected_fields is None:
+        raise FileMaterializationError(
+            f"unsupported {label} schema version", reason="incompatible"
+        )
+    if set(document) != expected_fields:
+        raise FileMaterializationError(f"{label} has unexpected fields")
+    return schema_version
+
+
+def _validate_epoch(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if type(value) is not str or not _HEX_ID.fullmatch(value):
+        raise FileMaterializationError(f"{label} epoch is malformed")
+    return value
+
+
+def _validate_manifest(
+    manifest: dict[str, Any], materialization_id: str
+) -> dict[str, Any]:
+    schema_version = _require_schema(
+        manifest, {1: _MANIFEST_FIELDS, 2: _MANIFEST_FIELDS_V2}, "manifest"
+    )
+    if manifest["materialization_id"] != materialization_id:
+        raise FileMaterializationError("manifest materialization ID does not match")
+    if schema_version == 2:
+        _validate_epoch(manifest["epoch"], "manifest")
+    if type(manifest["identity"]) is not dict:
+        raise FileMaterializationError("manifest identity must be an object")
+    if type(manifest["codec_id"]) is not str or not manifest["codec_id"]:
+        raise FileMaterializationError("manifest codec_id must be a non-empty string")
+    if type(manifest["payload_size"]) is not int or manifest["payload_size"] < 0:
+        raise FileMaterializationError("manifest payload_size must be non-negative")
+    payload_sha256 = manifest["payload_sha256"]
+    if type(payload_sha256) is not str or not _SHA256.fullmatch(payload_sha256):
+        raise FileMaterializationError("manifest payload digest is malformed")
+    return manifest
 
 
 def _write_synced(path: Path, data: bytes, *, existing: bool = False) -> None:

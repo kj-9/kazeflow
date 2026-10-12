@@ -27,6 +27,7 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
         "InvocationResult",
         "Materialization",
         "MaterializationContext",
+        "MaterializationInvalidation",
         "MaterializationRecord",
         "OpenCircuit",
         "PartitionDef",

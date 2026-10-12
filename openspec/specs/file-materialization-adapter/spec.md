@@ -25,7 +25,7 @@ The adapter SHALL require a storage root and an explicit codec with a non-empty 
 - **THEN** the adapter commits and reuses that date without aliasing an ISO string key or accepting datetime values
 
 ### Requirement: Portable committed identity
-Committed storage SHALL include a versioned self-describing manifest identifying the asset, explicit version, partition domain and typed key, ordered input materialization IDs, codec, record ID, and payload integrity metadata. Reuse SHALL require matching identity and codec. An absent reference SHALL be a miss; incompatible manifest versions and codecs, malformed references/manifests, missing referenced payloads, and integrity failures SHALL raise an adapter error. Records SHALL remain loadable after another commit for the same identity. Copying the storage root SHALL preserve reuse without depending on the original absolute location.
+Committed storage SHALL include a versioned self-describing manifest identifying the asset, explicit version, partition domain and typed key, ordered input materialization IDs, codec, record ID, and payload integrity metadata. Reuse SHALL require matching identity and codec. An absent reference SHALL be a miss; incompatible manifest versions and codecs, malformed references/manifests, missing referenced payloads, and integrity failures SHALL raise an adapter error. Records SHALL remain loadable after another commit for the same identity unless explicitly invalidated. New commits SHALL write reference and manifest schema version 2 carrying a nullable revocation epoch; legacy version 1 SHALL remain readable only when no revocation metadata exists for that identity. Unsupported versions SHALL fail explicitly. Revocation metadata SHALL use its own strict versioned format and stay relative to the storage root. Copying the storage root SHALL preserve reuse without depending on the original absolute location.
 
 #### Scenario: Fresh process and copied root
 - **WHEN** another process opens a copied store with the same codec and identity
@@ -41,7 +41,7 @@ Committed storage SHALL include a versioned self-describing manifest identifying
 
 #### Scenario: Older record survives replacement
 - **WHEN** another output is committed for an existing identity
-- **THEN** the old record remains loadable and subsequent resolve selects a complete committed generation
+- **THEN** the old record remains loadable if no invalidation occurred and subsequent resolve selects a complete committed generation
 
 ### Requirement: Atomic publication
 The adapter SHALL publish a reference only after a complete manifest and encoded payload have been written. Readers SHALL observe complete old or new generations during concurrent publication. A commit that fails before reference publication SHALL leave the previous reference reusable, or leave a miss if none existed. Encoding, decoding, and storage errors SHALL propagate as attempt failures under the existing executor contract. Atomic visibility SHALL not imply exactly-once external side effects or power-loss durability.
