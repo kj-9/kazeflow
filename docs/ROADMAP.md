@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M17 Complete; Issue #1・#2 follow-ups implemented and locally verified; GitHub integration pending; M18 deferred
+> Status: M0–M17 Complete; Issue #1・#2 follow-ups implemented; 0.1.0a5 release prepared; M18 deferred
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -65,7 +65,7 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 - #2: `add-available-materialization-aggregation` — 明示contextのcommitted成果物collection、失敗診断を保持した部分集約、単一local snapshotとreceipt。
 - #1: `add-resource-execution-statistics` — actual body/commitの実行・成否・retry、観測resource admission待機、live result統計lookup。
 
-次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。Issue #1・#2の必須追加機能はローカル実装・検証済み。IssueのcloseはGitHub反映とCI成功後に、明示的な承認を得て行う。
+次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。Issue #1・#2の必須追加機能は実装・検証済み。2026-10-12にGitHub反映・CI成功後のmerge/closeを承認済み。統合・公開の実行結果は対応PR、Issue、GitHub releaseを正本として参照する。
 
 | 順序 | Issue | Change | 完了条件・依存関係 |
 | --- | --- | --- | --- |

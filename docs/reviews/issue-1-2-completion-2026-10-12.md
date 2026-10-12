@@ -1,7 +1,9 @@
 # Issue #1・#2 の実装完了確認
 
 2026-10-12時点のread-only Issue本文・コメントauditとローカル統合検証。
-GitHub上の両IssueはOpenで、push・PR・CI・merge・完了コメント・closeは未実行。
+監査時点ではGitHub上の両IssueはOpenで、push・PR・CI・merge・closeは未実行。
+この文書はその時点の実装auditスナップショットであり、その後の統合・公開の状態は
+GitHubのPR・Issue・releaseを正本として参照する。
 
 ## Issue #1
 

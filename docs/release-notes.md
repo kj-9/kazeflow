@@ -1,165 +1,71 @@
 # Release notes
 
-## Unreleased: Resource execution statistics
+## 0.1.0a5: Resource policies and materialization workflows
 
-- Live `RunResult` objects expose immutable `ResourceStatistics` snapshots through
-  `resources` and `resource_statistics(name)`. They summarize actual body/commit
-  operations, completed outcomes, retries that start, and observed resource
-  admission waits for the current run.
-- Wait summaries count intervals from the first observed resource-policy denial to
-  body start or terminal skip. Preparation and dependency waits, and global-only
-  queueing before resource admission is examined, are excluded. An open interval can
-  include later scheduler delay; summed durations may overlap and are not exclusive
-  cause time or total flow time.
-- Statistics are available only on live results. Portable record versions 1–4,
-  events, CLI output, and SQLite schemas remain unchanged; historical records cannot
-  reconstruct counters. Added a runnable retry example and installed-wheel smoke
-  coverage.
+This alpha adds flow-scoped resource admission, explicit materialization reuse,
+and richer partition scheduling and result inspection. The core remains usable
+with the Python standard library alone; the Rich TUI remains an optional extra.
 
-## Unreleased: Available materialization aggregation
+- Named `ResourcePolicy` values can limit concurrent invocations and body starts
+  over a rolling time window. Policies can also set bounded retries, classify
+  body failures to open a run-scoped circuit, and apply shared cooldowns. Retries
+  reacquire resource permits; requested waits release execution capacity. A
+  classifier and an asset body can have application side effects and may run
+  more than once.
+- Live `RunResult` values expose resource-operation, outcome, retry, and observed
+  admission-wait statistics, plus `failed_partition_keys(task_name)` and
+  `circuit_skipped_partition_keys(task_name)`. The partition-key helpers inspect only the
+  current in-memory result and return original keys. They do not resume or start
+  another run; choosing keys for a later run remains explicit application logic.
+  Statistics and raw keys are not reconstructed from portable history.
+- Explicit materialization contexts can reuse compatible committed outputs.
+  The optional `MaterializationCollection` protocol and
+  `FileMaterialization.available(contexts)` select existing records from supplied
+  identities; the adapter does not scan history or infer keys. There is no
+  automatic partition selection or run resume. Successful attempts expose whether output was executed or reused and its adapter-defined
+  materialization ID in result, event, CLI, and stored-record projections.
+- The opt-in local `FileMaterialization` adapter uses a caller-supplied codec and
+  integrity-checked immutable generations. `inspect()` reports storage state;
+  `invalidate(context, reason=...)` explicitly revokes one exact identity without
+  deleting its generations; invalidation is never automatic. New references and
+  manifests use file format v2; updated readers accept legacy v1 when there is no revocation ledger. Older
+  releases cannot read v2, so stop old writers and quiesce users of the store
+  before adopting it. Invalidation does not lock processes, cascade, or guarantee
+  revocation after a full-root rollback or ledger deletion. Copy the complete
+  store, including its invalidation ledger, to preserve revocations.
+- Explicit `PartitionGroup` declarations can schedule disjoint linear chains
+  depth-first. A key retains its slot through the chain; a terminal key frees
+  a slot for another selected key. Group key limits are separate from global
+  concurrency and resource policies. Groups affect admission; they do not evict in-memory outputs or
+  provide exactly-once execution across runs.
+- Plan JSON advances to v5; run-result and history envelopes advance to v4; all
+  other CLI document types remain v1. The schema collection advances to v7.
+  Portable result records support v1–v4 and Python `RunResult.to_record()` still
+  defaults to v1 unless a version is requested. Event projections support v1–v4
+  and default to v4. SQLite database layout remains v1 and can retain records
+  v1–v4 without rewriting older rows. Each version is a separate contract.
+- Raw partition keys are omitted from portable history and CLI plan projections.
+  The CLI plan also omits callback code. Materialization IDs, invalidation reasons,
+  stored keys, and outputs are application data and receive no automatic
+  redaction. Applications should choose what they persist and publish.
 
-- Added optional `MaterializationCollection` and synchronous
-  `FileMaterialization.available(contexts)` for ordered lookup from an explicit
-  identity selection. Existing materialization adapters remain valid without the
-  optional protocol. Collection does not scan stored history or infer additional
-  keys; missing and invalidated identities are omitted while corrupt or incompatible
-  candidates remain explicit errors.
-- Collection and later loads are separate operations. Revocation and integrity are
-  checked again at load time; no multi-record transaction or external sink guarantee
-  is added.
-- Added a partial aggregation example that preserves the failed producer result and
-  publishes rows with a deterministic receipt in one atomically replaced local file.
-  The receipt and aggregate are plain application data, with no automatic redaction.
-
-## Unreleased: Depth-first partition groups
-
-- `Flow` accepts explicit `PartitionGroup` declarations for disjoint linear chains
-  of partitioned assets. The default active-key limit is one; each key traverses the
-  chain before the next key is admitted. Group key limits remain separate from
-  global invocation concurrency and named resource policies.
-- Planning rejects partial groups, invalid dependency chains, and dependencies that
-  leave a group and re-enter it. Plan JSON advances to v5 and publishes group names
-  and active-key limits in schema collection v7. Historical schema collections v1
-  through v6 remain unchanged; run/history and other document versions are
-  unchanged. No CLI group flags were added; declare groups in trusted Python flow
-  definitions.
-- Grouping controls admission only. It does not evict outputs from memory or
-  coordinate exactly-once work across runs. See the partition guide and runnable
-  example for the depth-first behavior.
-
-## Unreleased: Materialization provenance
-
-- Portable result record v4 preserves the resolution (`executed` or
-  `materialized`) and materialization ID on successful attempts. Failed, skipped,
-  and cancelled attempts carry null provenance. Python `RunResult.to_record()`
-  continues to default to v1; versions 1–3 retain their existing shapes.
-- Event projection defaults to v4 and adds nullable provenance to successful
-  attempt-finished events. Explicit event versions 1–3 keep their existing shapes.
-- CLI run and history envelopes advance to v4, while plan remains v4 and other
-  documents remain v1. The schema collection advances to v6. SQLite database
-  layout remains v1; new rows use portable record v4 and historical v1–v3 rows
-  remain readable.
-- Materialization IDs are opaque adapter-defined diagnostic strings. They may
-  contain application information and are not automatically redacted. History
-  inspection displays saved IDs without contacting adapters or loading outputs.
-- Added a runnable example and installed-wheel smoke coverage for committed and
-  reused provenance in results, events, and portable record v4.
-
-## Unreleased: Partition outcome queries
-
-- Live `RunResult` objects expose `failed_partition_keys(task_name)` and
-  `circuit_skipped_partition_keys(task_name)` to return original partition keys for
-  matching terminal outcomes, in attempt order. The queries preserve falsey keys and
-  distinguish circuit skips from other skipped work.
-- The methods are in-memory only. Portable records continue to omit raw partition
-  keys; selecting keys for another run remains an explicit application decision.
-- Added a runnable example showing how to inspect outcomes and explicitly choose keys
-  for a later run.
-
-## Unreleased: Local file materialization
-
-- Added opt-in `kazeflow.file_materialization.FileMaterialization` for reuse of
-  committed asset outputs across processes with explicit codecs and a versioned
-  integrity-checked manifest. The standard-library `JsonCodec` accepts strict JSON
-  values only; the adapter does not encrypt or redact stored outputs or keys.
-- Immutable generations are published through an atomic local reference update.
-  The store retains old generations and does not provide invalidation, cleanup,
-  locking, power-loss durability, or network filesystem guarantees. The adapter is
-  synchronous and a commit already running in a worker thread may finish after flow
-  cancellation.
-- Added a three-process example that commits a producer output, fails downstream,
-  then retries downstream while reusing the producer output.
-
-## Unreleased: Explicit materialization invalidation
-
-- Added the optional `MaterializationInvalidation` protocol and
-  `FileMaterialization.invalidate(context, reason=...)` for explicit revocation of
-  one exact identity. Existing resolve/load/commit adapters remain compatible, and
-  invalidation is never automatic.
-- Added non-mutating `FileMaterialization.inspect(context)` diagnostics with
-  `available`, `missing`, `invalidated`, `incompatible`, and `corrupt` statuses.
-- File references and manifests now use schema version 2 and carry revocation epochs;
-  updated readers can read version 1 while no revocation ledger exists. Stop older
-  writers before adopting the new format because older releases cannot read version 2.
-- Revocation is retained by copying the entire store, including its ledger, and blocks
-  restoration of old references and objects while that ledger remains intact. Full
-  root rollback and ledger deletion are outside this guarantee. Invalidation requires
-  quiescent users, does not lock processes, cascade, delete artifacts, or garbage
-  collect them.
-- Invalidation reasons are stored as ordinary application metadata without automatic
-  redaction. Added an example and installed-wheel smoke coverage for commit,
-  invalidation, explicit rebuild, and subsequent reuse.
-
-## Unreleased: Flow-scoped resource limits
-
-- `Flow` can declare named `ResourcePolicy` limits for simultaneous invocations
-  and asset body invocation starts over a rolling time window. Rate limits are
-  shared within one run, count body starts rather than API requests, and do not
-  coordinate separate runs.
-- The initial resource policy projection added plan schema v3 with selected
-  concurrency/rate limits and task-resource associations. The retry extension
-  below advances the current main contracts to plan v4 and run/history v2; the
-  circuit-breaker extension advances run/history to v3.
-- Plan v1 through v3 schemas and goldens remain available for historical use.
-
-## Unreleased: Resource circuit breaker
-
-- Resource failure classifiers can return `OpenCircuit()` to stop pending body work
-  on that resource for the rest of the current run. The first source attempt is
-  recorded; admitted operations finish normally, dependency-blocked outcomes retain
-  precedence, and compatible materialization hits can complete without a body call.
-- New circuit skips retain a `blocked_by` source reference. Portable result and event
-  schema v3 accept `resource_circuit_open` and aggregate `mixed_blocked` reasons;
-  older record/event versions reject those values.
-- CLI run and history envelopes advance to v3. The schema collection advances to v5,
-  while plan remains v4 and database layout remains v1. Stores can read and retain
-  mixed record v1/v2/v3 rows without rewriting existing records.
-
-## Unreleased: Resource retry and cooldown
-
-- Resource policies can opt into bounded retries with an explicit synchronous
-  failure classifier. Each retry reacquires concurrency and rolling rate permits;
-  requested backoff and resource cooldown waits release execution capacity.
-- One terminal logical attempt now retains numbered invocation history. Only asset
-  body exceptions are classified; materialization preparation/commit and observer
-  failures are not automatically retried. Application side effects may repeat.
-- Plan JSON advances to v4 with retry budget and classifier-enabled metadata. Run
-  result and history documents advance to v2 and include invocation records. SQLite
-  layout remains schema v1 and can store record v1, v2, and v3 rows.
-- Plan v1-v3 examples remain available for historical consumers; run/history v1
-  records remain readable. Consumers should explicitly accept the new per-type
-  schema versions.
+Consumers should check document type and schema version independently and
+explicitly accept the versions supported by their installed alpha. The current
+contracts are summarized in the [compatibility guide](user/releases/compatibility.md).
+See the [JSON automation contract](user/cli/json.md) and materialization
+references for field definitions and migration details.
 
 ## CLI compatibility policy
 
 The public `kazeflow` command names, documented options, exit statuses, and JSON
-schemas are versioned public interfaces. JSON output is the supported interface for
-automation; human-facing text is intended for review and can evolve in layout while
-preserving its documented meaning.
+schemas are versioned public interfaces. JSON output is the supported interface
+for automation; human-facing text is intended for review and can evolve in layout
+while preserving its documented meaning.
 
-Before a compatible release removes or renames a documented CLI command or option,
-the project will publish a deprecation, a migration path, and a release note.
-Breaking CLI changes require an explicitly documented pre-1.0 compatibility boundary.
+Before a compatible release removes or renames a documented CLI command or
+option, the project will publish a deprecation, a migration path, and a release
+note. Breaking CLI changes require an explicitly documented pre-1.0 compatibility
+boundary.
 
 ## 0.1.0a4: Validated partitions and typed automation output
 
@@ -174,24 +80,26 @@ Breaking CLI changes require an explicitly documented pre-1.0 compatibility boun
   `{document_type, schema_version, data}`. Interactive declines have their own
   `kazeflow.run-declined` document, and completed asset failures remain structured
   `kazeflow.run-result` documents with exit status `1`.
-- JSON mode routes ordinary output from entry modules, explicit factories, and asset
-  bodies to stderr so stdout remains one parseable document. This is stream routing
-  for trusted Python, not a sandbox or redaction guarantee.
+- JSON mode routes ordinary output from entry modules, explicit factories, and
+  asset bodies to stderr so stdout remains one parseable document. This is stream
+  routing for trusted Python, not a sandbox or redaction guarantee.
 - Draft 2020-12 JSON Schemas, normalized golden examples, and installed-wheel
   compatibility checks now cover all public machine-readable CLI commands.
 - GitHub Pages is the user-documentation source of truth, with searchable task,
-  concept, CLI, Partition, result/history, trust-boundary, and automation references.
+  concept, CLI, partition, result/history, trust-boundary, and automation
+  references.
 
-This is an alpha-breaking JSON migration: consumers of `0.1.0a3` JSON must read the
-new typed envelope and explicitly accept each `(document_type, schema_version)` pair.
+This is an alpha-breaking JSON migration: consumers of `0.1.0a3` JSON must read
+the typed envelope and explicitly accept each `(document_type, schema_version)`
+pair.
 
 ## 0.1.0a3: CLI review workflow
 
 - `kazeflow plan` presents a concise graph-oriented text review by default.
 - Mermaid and DOT plan projections are available without adding a runtime
   dependency or invoking an external renderer.
-- `kazeflow run --tui` presents plan-aware task state and overall progress only when
-  the optional TUI extra is explicitly installed and selected.
+- `kazeflow run --tui` presents plan-aware task state and overall progress only
+  when the optional TUI extra is explicitly installed and selected.
 - Text `kazeflow run` output now summarizes each task's terminal status, duration,
   and safe failure or skip context. `--verbose` adds safe attempt-level detail
   without exposing raw outputs, partition keys, exceptions, or tracebacks.
