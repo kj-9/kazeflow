@@ -28,6 +28,7 @@ from kazeflow import (
     DatePartitionDef,
     Flow,
     FlowPlan,
+    PartitionGroup,
     Materialization,
     MaterializationContext,
     MaterializationInvalidation,
@@ -246,6 +247,48 @@ query_record_before = query_result.to_record(schema_version=3)
 assert query_result.failed_partition_keys("query_partitions")
 assert query_result.to_record(schema_version=3) == query_record_before
 
+group_trace = []
+
+@kazeflow.asset(partition_def=DatePartitionDef())
+def grouped_extract(context: AssetContext):
+    partition_key = context.partition_key
+    assert partition_key is not None
+    key = str(partition_key)
+    group_trace.append(("extract", key))
+    return key
+
+@kazeflow.asset(partition_def=DatePartitionDef())
+def grouped_publish(grouped_extract: dict[object, str], context: AssetContext):
+    partition_key = context.partition_key
+    assert partition_key is not None
+    key = str(partition_key)
+    assert grouped_extract[partition_key] == key
+    group_trace.append(("publish", key))
+    return key
+
+group_flow = Flow(
+    ["grouped_publish"],
+    partition_groups=[
+        PartitionGroup(("grouped_extract", "grouped_publish"), max_active_keys=1)
+    ],
+)
+group_config = {"partition_keys": ["2026-08-11", "2026-08-12"]}
+group_plan = group_flow.plan(group_config)
+assert isinstance(group_plan, FlowPlan)
+assert group_plan.partition_groups[0].assets == (
+    "grouped_extract",
+    "grouped_publish",
+)
+assert group_plan.partition_groups[0].max_active_keys == 1
+group_result = asyncio.run(group_flow.run_async(group_config))
+assert group_result.status is FlowStatus.SUCCESS
+assert group_trace == [
+    ("extract", "2026-08-11"),
+    ("publish", "2026-08-11"),
+    ("extract", "2026-08-12"),
+    ("publish", "2026-08-12"),
+]
+
 flow_file = Path("smoke_flow.py")
 flow_file.write_text(
     '''
@@ -304,8 +347,9 @@ plan_cli = subprocess.run(
 )
 plan_document = json.loads(plan_cli.stdout)
 assert plan_document["document_type"] == "kazeflow.plan"
-assert plan_document["schema_version"] == 4
+assert plan_document["schema_version"] == 5
 assert plan_document["data"]["targets"] == ["publish"]
+assert plan_document["data"]["partition_groups"] == []
 assert plan_document["data"]["resources"] == [
     {
         "name": "network",

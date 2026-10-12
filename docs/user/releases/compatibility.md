@@ -30,10 +30,11 @@ enum meanings, and documented array order are append-closed. An incompatible cha
 uses a new schema version for that document type and has a migration note in release
 documentation.
 
-Plan schema v4 and run/history schema v4 are unreleased changes on `main`. Plan v4
-includes selected resource concurrency, rate limit, retry budget, and
-classifier-enabled metadata. Plan schemas v1 through v3 and CLI collections v1
-through v5 remain available for historical consumers. Run-result and history v4 add
+Plan schema v5 and run/history schema v4 are unreleased changes on `main`. Plan v5
+includes selected resource concurrency, rate limit, retry budget,
+classifier-enabled metadata, and selected partition groups. Plan schemas v1 through
+v4 and CLI collections v1 through v6 remain available for historical consumers.
+Run-result and history v4 add
 successful materialization provenance; stored rows retain their individual record
 version in the unchanged SQLite layout v1. Check the installed package's emitted
 versions before choosing a schema.

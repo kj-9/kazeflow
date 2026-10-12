@@ -12,6 +12,10 @@
 
 ::: kazeflow.Flow
 
+## `PartitionGroup`
+
+::: kazeflow.PartitionGroup
+
 ## `ResourcePolicy`
 
 ::: kazeflow.ResourcePolicy

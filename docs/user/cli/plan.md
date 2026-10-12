@@ -35,6 +35,14 @@ API requests, and separate runs have independent limits. Resource names are
 application-chosen metadata and may reveal information, so do not use secrets as
 names.
 
+Flows may also declare `PartitionGroup` values for disjoint linear chains of
+partitioned assets. A group bounds how many selected keys progress through all
+members before another key is admitted. This key limit is independent of global
+invocation concurrency and resource limits. The text plan shows selected groups;
+there are no CLI group flags. Define groups in the trusted Python flow and review
+them in the plan before running. See [Bound progress through a partition
+chain](../partitions.md#bound-progress-through-a-partition-chain).
+
 The same selected resource can configure `max_attempts` and `classify_failure` for
 explicit retries. The plan shows the invocation budget and a boolean indicating
 whether a classifier is configured; it never serializes callback code. The budget
@@ -71,5 +79,5 @@ The JSON plan projection is deterministic and intentionally lossy. It reports th
 selection kind, stable domain, and safe counts rather than serializing arbitrary raw
 partition keys. Text, JSON, Mermaid, and DOT plans preserve this no-raw-key boundary.
 Use JSON instead of parsing text whitespace. Plan documents in this unreleased
-change use schema version 4; check the installed package and see the
+change use schema version 5 and include selected groups without raw keys; check the installed package and see the
 [JSON automation contract](json.md) for migration guidance and schemas.

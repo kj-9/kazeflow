@@ -1,6 +1,7 @@
 from .assets import AssetContext, asset
 from .events import EventKind, ExecutionEvent, ExecutionEventConsumer
 from .flow import Flow, RunConfig, run
+from .groups import PartitionGroup
 from .materialization import (
     Materialization,
     MaterializationContext,
@@ -37,6 +38,7 @@ __all__ = [
     "MaterializationRecord",
     "OpenCircuit",
     "PartitionDef",
+    "PartitionGroup",
     "RateLimit",
     "RunConfig",
     "RunResult",

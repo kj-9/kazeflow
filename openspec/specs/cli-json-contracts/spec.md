@@ -132,11 +132,11 @@ successful JSON document to stdout and SHALL write their diagnostics to stderr.
   successful JSON document to stdout
 
 ### Requirement: Resource-aware plan documents use a new schema version
-Every emitted `kazeflow.plan` document SHALL use schema version 4 with selected-resource summaries, task associations, nullable rate limit, maximum invocations and classifier-enabled metadata. Empty resources and null associations SHALL be explicit. Run-result, runs-list, runs-show and runs-compare documents SHALL use version 4 with run-result portable record version 4 and stored-record versions 1–4. Version 4 SHALL preserve circuit reasons and invocation history and expose successful materialization provenance. Other document types SHALL retain version 1; SQLite database version SHALL remain 1. Published schema collection v6 SHALL describe the current matrix. Historical schema collections v1–v5 and goldens SHALL remain unchanged. Release documentation SHALL explain migration.
+Every emitted `kazeflow.plan` document SHALL use schema version 5 with selected-resource summaries, task associations, nullable rate limit, maximum invocations and classifier-enabled metadata. Empty resources and null associations SHALL be explicit. Run-result, runs-list, runs-show and runs-compare documents SHALL use version 4 with run-result portable record version 4 and stored-record versions 1–4. Version 4 SHALL preserve circuit reasons and invocation history and expose successful materialization provenance. Other document types SHALL retain version 1; SQLite database version SHALL remain 1. Its partition_groups array SHALL contain ordered assets and max_active_keys for each selected group, including an explicit empty array when none are selected. Published schema collection v7 SHALL describe the current matrix. Historical schema collections v1–v6 and goldens SHALL remain unchanged. Release documentation SHALL explain migration.
 
 #### Scenario: Resource-aware plan
 - **WHEN** an automation requests a JSON plan for shared-resource assets
-- **THEN** it receives a version 4 plan with concurrency, nullable rate limit and associations
+- **THEN** it receives a version 5 plan with concurrency, nullable rate limit and associations
 
 #### Scenario: No resources
 - **WHEN** a JSON plan has no selected resources
@@ -149,3 +149,7 @@ Every emitted `kazeflow.plan` document SHALL use schema version 4 with selected-
 #### Scenario: Provenance in run and stored history
 - **WHEN** JSON run succeeds using committed or reused materialization
 - **THEN** version 4 documents carry record version 4 metadata and history can also show unchanged older records
+
+#### Scenario: Group-aware plan
+- **WHEN** a grouped flow is inspected with JSON plan
+- **THEN** version5 exposes group members and active-key limits without raw keys

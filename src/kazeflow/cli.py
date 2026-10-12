@@ -32,7 +32,7 @@ EXIT_ENTRY = 3
 EXIT_INFRASTRUCTURE = 4
 _DEFAULT_HISTORY_STORE = Path(".kazeflow") / "runs.sqlite3"
 _CLI_DOCUMENT_SCHEMA_VERSION = 1
-_PLAN_DOCUMENT_SCHEMA_VERSION = 4
+_PLAN_DOCUMENT_SCHEMA_VERSION = 5
 _PORTABLE_RECORD_SCHEMA_VERSION = 4
 _HISTORY_DOCUMENT_SCHEMA_VERSION = 4
 
@@ -891,6 +891,13 @@ def _task_selection_record(task: Any, *, selection_kind: str) -> dict[str, Any]:
 def _plan_record(plan: FlowPlan) -> dict[str, Any]:
     return {
         "targets": list(plan.targets),
+        "partition_groups": [
+            {
+                "assets": list(group.assets),
+                "max_active_keys": group.max_active_keys,
+            }
+            for group in plan.partition_groups
+        ],
         "resources": [
             {
                 "name": resource.name,
@@ -961,6 +968,15 @@ def _text_plan(
                 f"    maximum body invocations: {resource.max_attempts} per logical attempt "
                 f"(including first); "
                 f"failure classifier: {'enabled' if resource.classifier_enabled else 'disabled'}",
+                file=stream,
+            )
+    if plan.partition_groups:
+        print("Partition groups:", file=stream)
+        for group in plan.partition_groups:
+            print(
+                "  "
+                + " -> ".join(group.assets)
+                + f": max active keys {group.max_active_keys}",
                 file=stream,
             )
     print("Graph:", file=stream)

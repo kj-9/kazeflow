@@ -30,7 +30,7 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, str,
 def _json_data(stdout: str, document_type: str) -> dict[str, Any]:
     document = json.loads(stdout)
     versions = {
-        "kazeflow.plan": 4,
+        "kazeflow.plan": 5,
         "kazeflow.run-result": 4,
         "kazeflow.runs-list": 4,
         "kazeflow.runs-show": 4,
@@ -370,6 +370,37 @@ flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=2,
     assert status == 0
     assert stderr == ""
     assert "Resources:" not in stdout
+
+
+def test_plan_text_shows_declared_partition_groups(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "grouped.py",
+        """
+from kazeflow import DatePartitionDef, Flow, PartitionGroup, asset
+
+@asset(partition_def=DatePartitionDef())
+def extract():
+    raise AssertionError("asset body must not run")
+
+@asset(partition_def=DatePartitionDef())
+def transform(extract):
+    raise AssertionError("asset body must not run")
+
+flow = Flow(["transform"], partition_groups=[PartitionGroup(("extract", "transform"), max_active_keys=2)])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["plan", str(entry), "--partition-key", "2026-08-11"]
+    )
+
+    assert status == 0
+    assert stderr == ""
+    assert "Partition groups:\n  extract -> transform: max active keys 2" in stdout
+    assert "2026-08-11" not in stdout
 
 
 def test_plan_verbose_is_text_only_and_keeps_partition_keys_private(

@@ -102,6 +102,39 @@ custom definition accepts `0`, `""`, or `False`, each is a present key—not omi
 work. A custom definition should publish a stable domain and normalization contract
 when it needs stricter validation.
 
+## Bound progress through a partition chain
+
+When a flow has a linear chain of partitioned assets, declare a `PartitionGroup` to
+limit how many selected keys can progress through that chain at once:
+
+```python
+from kazeflow import Flow, PartitionGroup
+
+flow = Flow(
+    ["publish_daily"],
+    partition_groups=[
+        PartitionGroup(("extract_daily", "transform_daily", "publish_daily")),
+    ],
+)
+plan = flow.plan({"partition_keys": ["2026-08-08", "2026-08-09"]})
+```
+
+The default `max_active_keys=1` lets the first selected key finish every group
+member before admitting the next key. Increase it to allow that many selected keys
+to progress concurrently. This key limit is separate from `PlanConfig.max_concurrency`
+and any resource policy: a key keeps its group slot while it waits for a retry,
+cooldown, preparation, or an invocation permit, while those other limits continue
+to control invocation starts and resource use.
+
+Groups are explicit, disjoint, ordered linear chains of partitioned assets. Each
+member after the first must directly depend on its predecessor. The selected group
+must be wholly present in the flow plan; partial selection and dependency paths that
+leave a group and re-enter it fail during planning. Grouping changes admission only:
+it does not evict outputs from memory or coordinate separate runs. Ungrouped flows
+keep their existing scheduling behavior. The
+[runnable example](https://github.com/kj-9/kazeflow/blob/main/examples/partition_groups.py)
+shows the first key traversing both assets before the second key starts.
+
 ## Inspect and explicitly select outcomes
 
 After a run, use the live result to select terminal failures or resource circuit

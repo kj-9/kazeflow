@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
 import logging
 import inspect
 import time
@@ -21,6 +21,7 @@ from .events import (
     NoOpExecutionEventConsumer,
     validate_event_sequence,
 )
+from .groups import PartitionGroup
 from .plan import FlowPlan, PlanConfig, TaskPlan, build_flow_plan
 from .materialization import (
     MaterializationContext,
@@ -98,6 +99,13 @@ class _TaskState:
     result: TaskResult | None = None
 
 
+@dataclass(slots=True)
+class _GroupState:
+    declaration: PartitionGroup
+    active: list[int]
+    next_index: int = 0
+
+
 class Flow:
     """An explicit target set and its exact asset registry.
 
@@ -111,9 +119,18 @@ class Flow:
         *,
         registry: AssetRegistry = default_registry,
         resources: Mapping[str, ResourcePolicy] | None = None,
+        partition_groups: Sequence[PartitionGroup] | None = None,
     ) -> None:
         self.registry = registry
         self.resources = dict(resources) if resources is not None else {}
+        if partition_groups is not None and (
+            isinstance(partition_groups, (str, bytes, bytearray))
+            or not isinstance(partition_groups, Sequence)
+        ):
+            raise TypeError("partition_groups must be a sequence of PartitionGroup")
+        self.partition_groups = (
+            tuple(partition_groups) if partition_groups is not None else ()
+        )
         self.graph: dict[str, set[str]] = {}
         self._legacy_graph: dict[str, set[str]] | None = None
         if isinstance(targets, dict):
@@ -153,6 +170,7 @@ class Flow:
             config=config,
             registry=self.registry,
             resources=self.resources,
+            partition_groups=self.partition_groups,
         )
         if self._legacy_graph is not None:
             _validate_legacy_graph(self._legacy_graph, plan)
@@ -284,6 +302,12 @@ class _Executor:
             asyncio.get_running_loop().create_future()
         )
         self.tasks = {task.name: self._make_task_state(task) for task in plan.tasks}
+        self._groups = {
+            group.assets[0]: _GroupState(group, []) for group in plan.partition_groups
+        }
+        self._group_members = {
+            name for group in plan.partition_groups for name in group.assets
+        }
 
     def _make_task_state(self, task: TaskPlan) -> _TaskState:
         reference = TaskReference(task.name)
@@ -386,44 +410,70 @@ class _Executor:
     ) -> tuple[_TaskState, _AttemptState, SkipReason | None] | None:
         self._rate_deadline = None
         now = time.monotonic()
-        for task_plan in self.plan.tasks:
-            task = self.tasks[task_plan.name]
-            if task.result is not None:
+        for task, attempt in self._action_candidates():
+            if attempt.result is not None or attempt.future is not None:
                 continue
-            for attempt in task.attempts:
-                if attempt.result is not None or attempt.future is not None:
-                    continue
-                eligibility = self._eligibility(task, attempt)
-                if eligibility == "ready":
-                    if task.plan.materialization_enabled and attempt.prepared is None:
-                        return task, attempt, None
-                    resource = task.plan.resource_name
-                    if resource in self._circuits:
-                        return task, attempt, SkipReason.RESOURCE_CIRCUIT_OPEN
-                    if (
-                        resource is not None
-                        and self._resource_running.get(resource, 0)
-                        >= self._resource_limits[resource]
-                    ):
-                        continue
-                    window = (
-                        self._rate_windows.get(resource)
-                        if resource is not None
-                        else None
-                    )
-                    ready_at = max(attempt.ready_at, self._cooldowns.get(resource, 0.0))
-                    if window is not None and not window.ready(now):
-                        deadline = window.deadline(now)
-                        if deadline is not None:
-                            self._wait_until(max(ready_at, deadline))
-                        continue
-                    if ready_at > now:
-                        self._wait_until(ready_at)
-                        continue
+            eligibility = self._eligibility(task, attempt)
+            if eligibility == "ready":
+                if task.plan.materialization_enabled and attempt.prepared is None:
                     return task, attempt, None
-                if eligibility == "blocked":
-                    return task, attempt, SkipReason.DEPENDENCY_BLOCKED
+                resource = task.plan.resource_name
+                if resource in self._circuits:
+                    return task, attempt, SkipReason.RESOURCE_CIRCUIT_OPEN
+                if (
+                    resource is not None
+                    and self._resource_running.get(resource, 0)
+                    >= self._resource_limits[resource]
+                ):
+                    continue
+                window = (
+                    self._rate_windows.get(resource) if resource is not None else None
+                )
+                ready_at = max(attempt.ready_at, self._cooldowns.get(resource, 0.0))
+                if window is not None and not window.ready(now):
+                    deadline = window.deadline(now)
+                    if deadline is not None:
+                        self._wait_until(max(ready_at, deadline))
+                    continue
+                if ready_at > now:
+                    self._wait_until(ready_at)
+                    continue
+                return task, attempt, None
+            if eligibility == "blocked":
+                return task, attempt, SkipReason.DEPENDENCY_BLOCKED
         return None
+
+    def _action_candidates(self) -> Iterator[tuple[_TaskState, _AttemptState]]:
+        """Prefer the next stage of admitted keys, retaining ordinary outside order."""
+        for task_plan in self.plan.tasks:
+            group = self._groups.get(task_plan.name)
+            if group is not None:
+                members = [self.tasks[name] for name in group.declaration.assets]
+                group.active[:] = [
+                    index
+                    for index in group.active
+                    if not all(
+                        member.attempts[index].result is not None for member in members
+                    )
+                ]
+                while len(
+                    group.active
+                ) < group.declaration.max_active_keys and group.next_index < len(
+                    members[0].attempts
+                ):
+                    group.active.append(group.next_index)
+                    group.next_index += 1
+                for index in group.active:
+                    for member in members:
+                        attempt = member.attempts[index]
+                        if attempt.result is None:
+                            yield member, attempt
+                            break
+            elif task_plan.name not in self._group_members:
+                task = self.tasks[task_plan.name]
+                if task.result is None:
+                    for attempt in task.attempts:
+                        yield task, attempt
 
     def _wait_until(self, deadline: float) -> None:
         self._rate_deadline = (

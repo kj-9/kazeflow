@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased: Depth-first partition groups
+
+- `Flow` accepts explicit `PartitionGroup` declarations for disjoint linear chains
+  of partitioned assets. The default active-key limit is one; each key traverses the
+  chain before the next key is admitted. Group key limits remain separate from
+  global invocation concurrency and named resource policies.
+- Planning rejects partial groups, invalid dependency chains, and dependencies that
+  leave a group and re-enter it. Plan JSON advances to v5 and publishes group names
+  and active-key limits in schema collection v7. Historical schema collections v1
+  through v6 remain unchanged; run/history and other document versions are
+  unchanged. No CLI group flags were added; declare groups in trusted Python flow
+  definitions.
+- Grouping controls admission only. It does not evict outputs from memory or
+  coordinate exactly-once work across runs. See the partition guide and runnable
+  example for the depth-first behavior.
+
 ## Unreleased: Materialization provenance
 
 - Portable result record v4 preserves the resolution (`executed` or

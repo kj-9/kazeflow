@@ -8,6 +8,7 @@ from typing import Any, Hashable, Optional, Sequence
 from collections.abc import Mapping
 
 from .assets import AssetRegistry, default_registry
+from .groups import PartitionGroup
 from .partition import PartitionDef
 from .resources import RateLimit, ResourcePolicy
 
@@ -79,11 +80,13 @@ class FlowPlan:
     tasks: tuple[TaskPlan, ...]
     config: PlanConfig
     resources: tuple[ResourcePlan, ...] = ()
+    partition_groups: tuple[PartitionGroup, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "targets", tuple(self.targets))
         object.__setattr__(self, "tasks", tuple(self.tasks))
         object.__setattr__(self, "resources", tuple(self.resources))
+        object.__setattr__(self, "partition_groups", tuple(self.partition_groups))
 
 
 def build_flow_plan(
@@ -92,6 +95,7 @@ def build_flow_plan(
     config: Optional[PlanConfig] = None,
     registry: AssetRegistry = default_registry,
     resources: Mapping[str, ResourcePolicy] | None = None,
+    partition_groups: Sequence[PartitionGroup] | None = None,
 ) -> FlowPlan:
     """Build a validated, dependency-first plan without executing assets."""
 
@@ -132,6 +136,12 @@ def build_flow_plan(
     )
 
     ordered_names = _topological_order(dependencies_by_name)
+    selected_partition_groups = _validate_partition_groups(
+        partition_groups,
+        selected_names=set(dependencies_by_name),
+        plan_positions={name: index for index, name in enumerate(ordered_names)},
+        registry=registry,
+    )
     task_plans = tuple(
         TaskPlan(
             name=name,
@@ -163,7 +173,127 @@ def build_flow_plan(
             )
             for name in sorted(selected_resources)
         ),
+        partition_groups=selected_partition_groups,
     )
+
+
+def _validate_partition_groups(
+    partition_groups: Sequence[PartitionGroup] | None,
+    *,
+    selected_names: set[str],
+    plan_positions: Mapping[str, int],
+    registry: AssetRegistry,
+) -> tuple[PartitionGroup, ...]:
+    if partition_groups is None:
+        return ()
+    if isinstance(partition_groups, (str, bytes, bytearray)) or not isinstance(
+        partition_groups, Sequence
+    ):
+        raise TypeError("partition_groups must be a sequence of PartitionGroup")
+
+    normalized_groups: list[PartitionGroup] = []
+    declared_assets: set[str] = set()
+    for item in partition_groups:
+        if not isinstance(item, PartitionGroup):
+            raise TypeError("partition_groups must contain only PartitionGroup values")
+        # Reconstruct to validate even instances created by bypassing __init__.
+        group = PartitionGroup(item.assets, item.max_active_keys)
+        overlap = declared_assets.intersection(group.assets)
+        if overlap:
+            duplicate = sorted(overlap)[0]
+            raise ValueError(
+                f"partition groups must be disjoint; asset '{duplicate}' is repeated"
+            )
+        declared_assets.update(group.assets)
+        normalized_groups.append(group)
+
+    selected_groups: list[PartitionGroup] = []
+    for group in normalized_groups:
+        definitions: list[tuple[str, PartitionDef]] = []
+        dependencies_by_group_asset: dict[str, tuple[str, ...]] = {}
+        for name in group.assets:
+            try:
+                asset = registry.get(name)
+            except (KeyError, ValueError) as error:
+                raise ValueError(f"PartitionGroup asset '{name}' not found") from error
+            definition = asset.partition_def
+            if definition is None:
+                raise ValueError(f"PartitionGroup asset '{name}' must be partitioned")
+            dependencies = _canonical_dependencies(asset.deps, name)
+            dependencies_by_group_asset[name] = dependencies
+            definitions.append((name, definition))
+
+        _validate_partition_domains(tuple(definitions))
+        for previous, current in zip(group.assets, group.assets[1:]):
+            if previous not in dependencies_by_group_asset[current]:
+                raise ValueError(
+                    f"PartitionGroup asset '{current}' must directly depend on "
+                    f"its predecessor '{previous}'"
+                )
+
+        members = set(group.assets)
+        for member in group.assets:
+            for dependency in dependencies_by_group_asset[member]:
+                if dependency in members:
+                    continue
+                if _has_group_ancestor(
+                    dependency,
+                    members,
+                    registry=registry,
+                    visiting=set(),
+                    memo={},
+                ):
+                    raise ValueError(
+                        "PartitionGroup dependency paths must not leave and re-enter "
+                        f"the group (through dependency '{dependency}' of '{member}')"
+                    )
+
+        selected_count = sum(name in selected_names for name in group.assets)
+        if selected_count == 0:
+            continue
+        if selected_count != len(group.assets):
+            raise ValueError(
+                "PartitionGroup must be wholly selected or wholly unselected"
+            )
+        selected_groups.append(group)
+
+    selected_groups.sort(key=lambda group: plan_positions[group.assets[0]])
+    return tuple(selected_groups)
+
+
+def _has_group_ancestor(
+    name: str,
+    members: set[str],
+    *,
+    registry: AssetRegistry,
+    visiting: set[str],
+    memo: dict[str, bool],
+) -> bool:
+    if name in members:
+        return True
+    if name in memo:
+        return memo[name]
+    if name in visiting:
+        raise ValueError(f"Dependency cycle detected at asset '{name}'")
+    try:
+        asset = registry.get(name)
+    except (KeyError, ValueError) as error:
+        raise ValueError(f"Asset '{name}' not found") from error
+
+    visiting.add(name)
+    result = any(
+        _has_group_ancestor(
+            dependency,
+            members,
+            registry=registry,
+            visiting=visiting,
+            memo=memo,
+        )
+        for dependency in _canonical_dependencies(asset.deps, name)
+    )
+    visiting.remove(name)
+    memo[name] = result
+    return result
 
 
 def _validate_materializations(

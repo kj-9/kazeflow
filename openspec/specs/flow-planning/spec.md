@@ -11,7 +11,7 @@ and `build_flow_plan()`.  `PlanConfig` SHALL contain `max_concurrency` and the
 optional selected `partition_keys`; `TaskPlan` SHALL contain a task name, its
 direct dependency names, and its partition selection; and `FlowPlan` SHALL
 contain the canonical selected targets, the ordered task plans, and the
-normalized plan configuration.  All three model values SHALL be immutable
+normalized plan configuration, optional resource summaries and a tuple of selected PartitionGroup values as partition_groups (default empty).  All three model values SHALL be immutable
 after construction, and every sequence exposed by them SHALL be a tuple.
 `FlowPlan.targets` SHALL be the lexicographically sorted tuple of directly
 selected target names, not the transitive closure and not the caller's input

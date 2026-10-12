@@ -17,8 +17,10 @@ from kazeflow.cli import main
 
 
 _ROOT = Path(__file__).parents[1]
-_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v6/schema.json"
-_GOLDENS = _ROOT / "tests/fixtures/cli-json/v6"
+_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v7/schema.json"
+_GOLDENS = _ROOT / "tests/fixtures/cli-json/v7"
+_HISTORICAL_V6_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v6/schema.json"
+_HISTORICAL_V6_GOLDENS = _ROOT / "tests/fixtures/cli-json/v6"
 _HISTORICAL_V5_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v5/schema.json"
 _HISTORICAL_V5_GOLDENS = _ROOT / "tests/fixtures/cli-json/v5"
 _HISTORICAL_V1_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v1/schema.json"
@@ -31,6 +33,7 @@ _PLAN_V3_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v3/schema.json"
 _PLAN_V3_GOLDENS = _ROOT / "tests/fixtures/cli-json/v3"
 _PLAN_V4_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v4/schema.json"
 _PLAN_V4_GOLDENS = _ROOT / "tests/fixtures/cli-json/v4"
+_PLAN_V5_SCHEMA_PATH = _ROOT / "docs/user/schemas/cli/v7/schema.json"
 
 
 def _validator() -> Any:
@@ -58,6 +61,10 @@ def _golden_v2(name: str) -> dict[str, Any]:
 
 def _golden_v3(name: str) -> dict[str, Any]:
     return json.loads((_PLAN_V3_GOLDENS / name).read_text(encoding="utf-8"))
+
+
+def _golden_v6(name: str) -> dict[str, Any]:
+    return json.loads((_HISTORICAL_V6_GOLDENS / name).read_text(encoding="utf-8"))
 
 
 def _current_validator() -> Any:
@@ -119,7 +126,7 @@ def test_checked_in_goldens_validate_against_the_normative_schema() -> None:
     validator = _validator()
     golden_paths = sorted(_GOLDENS.glob("*.json"))
 
-    assert len(golden_paths) == 15
+    assert len(golden_paths) == 16
     for path in golden_paths:
         validator.validate(json.loads(path.read_text(encoding="utf-8")))
 
@@ -138,6 +145,15 @@ def test_checked_in_goldens_validate_against_the_normative_schema() -> None:
     assert len(historical_v5_goldens) == 15
     for path in historical_v5_goldens:
         historical_v5_validator.validate(json.loads(path.read_text(encoding="utf-8")))
+
+    historical_v6_validator = Draft202012Validator(
+        json.loads(_HISTORICAL_V6_SCHEMA_PATH.read_text(encoding="utf-8")),
+        format_checker=FormatChecker(),
+    )
+    historical_v6_goldens = sorted(_HISTORICAL_V6_GOLDENS.glob("*.json"))
+    assert len(historical_v6_goldens) == 15
+    for path in historical_v6_goldens:
+        historical_v6_validator.validate(json.loads(path.read_text(encoding="utf-8")))
 
     historical_validator = _plan_v2_validator()
     historical_goldens = sorted(_PLAN_V2_GOLDENS.glob("*.json"))
@@ -182,6 +198,49 @@ flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=3,
     assert stderr == ""
     _current_validator().validate(plan)
     assert plan == _current_golden("plan-rate.json")
+
+
+def test_grouped_flow_plan_json_v5_matches_golden(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "grouped_flow.py",
+        """
+from kazeflow import DatePartitionDef, Flow, PartitionGroup, asset
+
+@asset(partition_def=DatePartitionDef())
+def extract():
+    raise AssertionError("asset body must not run")
+
+@asset(partition_def=DatePartitionDef())
+def transform(extract):
+    raise AssertionError("asset body must not run")
+
+flow = Flow(["transform"], partition_groups=[PartitionGroup(("extract", "transform"), max_active_keys=2)])
+""",
+    )
+    status, plan, stderr = _run(
+        capsys,
+        [
+            "plan",
+            str(entry),
+            "--partition-key",
+            "2026-08-11",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert status == 0
+    assert stderr == ""
+    _current_validator().validate(plan)
+    assert plan == _current_golden("plan-group.json")
+    assert plan["schema_version"] == 5
+    assert plan["data"]["partition_groups"] == [
+        {"assets": ["extract", "transform"], "max_active_keys": 2}
+    ]
+    assert "2026-08-11" not in json.dumps(plan)
 
 
 def test_resource_plan_without_rate_limit_has_explicit_null(
@@ -319,7 +378,8 @@ def test_published_document_specific_schemas_resolve_the_shared_schema() -> None
     for schema_path, golden_path in (
         (_PLAN_V2_SCHEMA_PATH, _golden_v2("plan-resource.json")),
         (_PLAN_V3_SCHEMA_PATH, _golden_v3("plan-rate.json")),
-        (_PLAN_V4_SCHEMA_PATH, _current_golden("plan-rate.json")),
+        (_PLAN_V4_SCHEMA_PATH, _golden_v6("plan-rate.json")),
+        (_PLAN_V5_SCHEMA_PATH, _current_golden("plan-rate.json")),
     ):
         wrapper = json.loads(
             (schema_path.parent / "plan.schema.json").read_text(encoding="utf-8")

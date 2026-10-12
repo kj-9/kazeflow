@@ -138,7 +138,7 @@ def test_partition_selection_contract_matches_documentation(
     )
     key_projection = json.loads(capsys.readouterr().out)
     assert key_projection["document_type"] == "kazeflow.plan"
-    assert key_projection["schema_version"] == 4
+    assert key_projection["schema_version"] == 5
     key_data = key_projection["data"]
     assert key_data["config"]["partition_selection"] == {
         "kind": "keys",

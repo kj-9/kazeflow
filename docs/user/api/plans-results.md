@@ -8,6 +8,12 @@ portable projection boundary.
 
 ::: kazeflow.FlowPlan
 
+`FlowPlan.partition_groups` lists the selected immutable `PartitionGroup`
+declarations in deterministic plan order. Planning validates group membership and
+linear dependencies before execution and does not invoke assets or adapters. The
+group limit governs active selected keys; global concurrency and resource policies
+continue to govern invocations separately. See [partition groups](../partitions.md#bound-progress-through-a-partition-chain).
+
 ## `RunResult`
 
 ::: kazeflow.RunResult

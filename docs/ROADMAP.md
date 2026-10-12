@@ -61,8 +61,9 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 - #2: `add-file-materialization-adapter` — 明示codec、manifest整合性検証、atomic publication、別プロセスでの再利用。
 - #2: `record-materialization-provenance` — portable result/event/CLI v4、SQLiteの混在record、commit/reuseのIDと実行方法。
 - #2: `add-materialization-invalidation` — exact identityのepoch ledger、旧artifact復元の拒否、明示的rebuild、診断inspection。
+- #2: `add-depth-first-partition-groups` — 明示asset列のactive key cap、depth-first admission、plan JSON v5と既存result順序の維持。
 
-次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。次は #2 のdepth-first partition groupsを進める。
+次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。次は #2 のavailable materialization aggregationを進める。
 
 | 順序 | Issue | Change | 完了条件・依存関係 |
 | --- | --- | --- | --- |
@@ -73,7 +74,7 @@ archive済みchangeの完了とIssue全体の完了を区別する。検証済�
 | 5 | #1 | `add-partition-outcome-queries` | 2026-10-12完了・archive済み。failed/circuit-skipped key取得、falsey/opaque key、unknown/unpartitioned taskの診断、明示的rerunを検証。 |
 | 6 | #2 | `record-materialization-provenance` | 2026-10-12完了・archive済み。executed/materializedとIDをportable result/event/CLI v4へ反映。SQLite DB v1とrecord v1–v4の混在、retryとの整合を検証。 |
 | 7 | #2 | `add-materialization-invalidation` | 2026-10-12完了・archive済み。明示invalidation/epoch ledger、互換性・破損診断、ledger保持下の旧artifact復活防止とrebuildを検証。 |
-| 8 | #2 | `add-depth-first-partition-groups` | 同一keyのasset列、active key数上限、通常のdependency/result orderingとの整合。 |
+| 8 | #2 | `add-depth-first-partition-groups` | 2026-10-12完了・archive済み。同一keyの明示asset列、active key数上限、retry/circuit/materializationとdependency/result orderingの整合を検証。 |
 | 9 | #2 | `add-available-materialization-aggregation` | 一部失敗後もcommitted成果物を列挙して集約、過去成果物の選択範囲、単一atomic publicationとreceipt。 |
 
 executor、共有model、同じcapabilityのsync/archiveは直列ownerとする。

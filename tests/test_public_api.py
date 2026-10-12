@@ -31,6 +31,7 @@ def test_root_exports_the_core_workflow_and_event_boundary() -> None:
         "MaterializationRecord",
         "OpenCircuit",
         "PartitionDef",
+        "PartitionGroup",
         "RateLimit",
         "RunConfig",
         "RunResult",
