@@ -4,6 +4,7 @@ from .flow import Flow, RunConfig, run
 from .groups import PartitionGroup
 from .materialization import (
     Materialization,
+    MaterializationCollection,
     MaterializationContext,
     MaterializationInvalidation,
     MaterializationRecord,
@@ -33,6 +34,7 @@ __all__ = [
     "FlowPlan",
     "InvocationResult",
     "Materialization",
+    "MaterializationCollection",
     "MaterializationContext",
     "MaterializationInvalidation",
     "MaterializationRecord",

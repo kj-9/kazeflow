@@ -17,6 +17,7 @@ import tempfile
 import uuid
 from datetime import date
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 from kazeflow.materialization import MaterializationContext, MaterializationRecord
@@ -220,6 +221,35 @@ class FileMaterialization:
                 reason=inspection.status,
             )
         return inspection.record
+
+    def available(
+        self, contexts: Sequence[MaterializationContext]
+    ) -> tuple[MaterializationRecord, ...]:
+        """Return committed records for an explicit, ordered identity selection.
+
+        The selection is snapshotted and every identity is validated before any
+        storage lookup. Missing or invalidated identities are omitted; storage
+        corruption and incompatibility errors from :meth:`resolve` propagate.
+        """
+        if isinstance(contexts, (str, bytes, bytearray)) or not isinstance(
+            contexts, Sequence
+        ):
+            raise TypeError("contexts must be a non-text sequence of contexts")
+
+        selected = tuple(contexts)
+        identities: set[bytes] = set()
+        for context in selected:
+            identity_bytes = _canonical_json(_identity(context))
+            if identity_bytes in identities:
+                raise ValueError("contexts contain a duplicate exact identity")
+            identities.add(identity_bytes)
+
+        records: list[MaterializationRecord] = []
+        for context in selected:
+            record = self.resolve(context)
+            if record is not None:
+                records.append(record)
+        return tuple(records)
 
     def inspect(self, context: MaterializationContext) -> FileMaterializationInspection:
         """Inspect one identity without writing or decoding its output."""

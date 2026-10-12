@@ -113,6 +113,114 @@ def test_equal_falsey_keys_of_different_types_do_not_alias(tmp_path: Path) -> No
     assert store.resolve(bool_context) == bool_record
 
 
+def test_available_returns_only_explicit_committed_records_in_selection_order(
+    tmp_path: Path,
+) -> None:
+    store = adapter(tmp_path / "store")
+    contexts = (
+        context(asset_name="first", partition_key=0),
+        context(asset_name="missing", partition_key=False),
+        context(asset_name="last", partition_key=""),
+    )
+    first = store.commit(contexts[0], {"order": 1})
+    last = store.commit(contexts[2], {"order": 3})
+    resolved: list[MaterializationContext] = []
+    resolve = store.resolve
+
+    def track(selected: MaterializationContext):
+        resolved.append(selected)
+        return resolve(selected)
+
+    store.resolve = track  # type: ignore[method-assign]
+
+    assert store.available(contexts) == (first, last)
+    assert resolved == list(contexts)
+
+
+@pytest.mark.parametrize("selection", ["text", b"bytes", bytearray(b"bytes"), iter(())])
+def test_available_rejects_non_sequence_selection_without_storage_io(
+    tmp_path: Path, selection: object
+) -> None:
+    store = adapter(tmp_path / "store")
+
+    with pytest.raises(TypeError, match="non-text sequence"):
+        store.available(selection)  # type: ignore[arg-type]
+
+    assert not store.root.exists()
+
+
+def test_available_validates_all_contexts_before_storage_lookup(tmp_path: Path) -> None:
+    store = adapter(tmp_path / "store")
+    calls: list[MaterializationContext] = []
+
+    def track(selected: MaterializationContext):
+        calls.append(selected)
+        return None
+
+    store.resolve = track  # type: ignore[method-assign]
+    malformed = context(partition_key=object())
+
+    with pytest.raises(FileMaterializationError):
+        store.available((context(asset_name="valid"), malformed))
+
+    assert calls == []
+
+
+def test_available_rejects_duplicate_identity_before_storage_lookup(
+    tmp_path: Path,
+) -> None:
+    store = adapter(tmp_path / "store")
+    calls: list[MaterializationContext] = []
+
+    def track(selected: MaterializationContext):
+        calls.append(selected)
+        return None
+
+    store.resolve = track  # type: ignore[method-assign]
+    selected = context(partition_key=0)
+
+    with pytest.raises(ValueError, match="duplicate exact identity"):
+        store.available((selected, context(partition_key=0)))
+
+    assert calls == []
+    assert not store.root.exists()
+
+
+def test_available_preserves_typed_falsey_identity_distinctions(
+    tmp_path: Path,
+) -> None:
+    store = adapter(tmp_path / "store")
+    int_context = context(partition_key=0)
+    bool_context = context(partition_key=False)
+    int_record = store.commit(int_context, "int")
+    bool_record = store.commit(bool_context, "bool")
+
+    assert store.available((bool_context, int_context)) == (bool_record, int_record)
+
+
+def test_available_empty_selection_does_not_touch_storage(tmp_path: Path) -> None:
+    store = adapter(tmp_path / "store")
+
+    assert store.available(()) == ()
+    assert not store.root.exists()
+
+
+def test_available_propagates_corrupt_candidate_errors(tmp_path: Path) -> None:
+    store = adapter(tmp_path / "store")
+    selected = context()
+    store.commit(selected, "output")
+    reference_path = refs(store.root)[0]
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    reference["schema_version"] = 999
+    reference_path.write_text(json.dumps(reference), encoding="utf-8")
+
+    with pytest.raises(FileMaterializationError) as error:
+        store.available((selected,))
+
+    assert isinstance(error.value, FileMaterializationError)
+    assert error.value.reason == "incompatible"
+
+
 def test_date_partition_keys_round_trip_without_aliasing_iso_strings(
     tmp_path: Path,
 ) -> None:

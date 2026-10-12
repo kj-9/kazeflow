@@ -11,7 +11,7 @@ import asyncio
 import functools
 import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Protocol, TypeVar
+from typing import Any, Awaitable, Callable, Protocol, Sequence, TypeVar
 
 
 MaterializationInputs = tuple[tuple[str, str], ...]
@@ -114,6 +114,22 @@ class MaterializationRecord:
         object.__setattr__(self, "input_materialization_ids", inputs)
         if not isinstance(self.committed, bool):
             raise ValueError("committed must be a bool")
+
+
+class MaterializationCollection(Protocol):
+    """Optional collection of committed records from explicit exact identities.
+
+    Collection does not change run status or invoke aggregation/publication.
+    Callers explicitly load records and coordinate any concurrent storage changes.
+    """
+
+    def available(
+        self, contexts: Sequence[MaterializationContext]
+    ) -> (
+        tuple[MaterializationRecord, ...] | Awaitable[tuple[MaterializationRecord, ...]]
+    ):
+        """Return available committed records in the supplied identity order."""
+        ...
 
 
 class MaterializationInvalidation(Protocol):

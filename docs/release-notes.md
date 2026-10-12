@@ -1,5 +1,20 @@
 # Release notes
 
+## Unreleased: Available materialization aggregation
+
+- Added optional `MaterializationCollection` and synchronous
+  `FileMaterialization.available(contexts)` for ordered lookup from an explicit
+  identity selection. Existing materialization adapters remain valid without the
+  optional protocol. Collection does not scan stored history or infer additional
+  keys; missing and invalidated identities are omitted while corrupt or incompatible
+  candidates remain explicit errors.
+- Collection and later loads are separate operations. Revocation and integrity are
+  checked again at load time; no multi-record transaction or external sink guarantee
+  is added.
+- Added a partial aggregation example that preserves the failed producer result and
+  publishes rows with a deterministic receipt in one atomically replaced local file.
+  The receipt and aggregate are plain application data, with no automatic redaction.
+
 ## Unreleased: Depth-first partition groups
 
 - `Flow` accepts explicit `PartitionGroup` declarations for disjoint linear chains

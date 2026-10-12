@@ -32,6 +32,19 @@ artifact restoration guarantee. Invalidation does not delete output generations 
 cascade to dependent identities. See the
 [partition invalidation guide](../partitions.md#invalidate-one-materialization-explicitly).
 
+`FileMaterialization.available(contexts)` is caller-scoped metadata lookup, not a
+snapshot transaction. It does not scan the root or infer prior outputs from run
+history. A selected record can be invalidated after collection, and a subsequent
+`load` must still reject it. Applications requiring a stable selected set must
+coordinate writers and invalidation across collection and loading.
+
+Materialization IDs, aggregate rows, and publication receipts are application data.
+The partial aggregation example stores its receipt and rows together in one local
+JSON file and uses a deterministic ID for identical rows and included materialization
+IDs. JSON and atomic replacement provide neither encryption nor redaction. The
+example's local file behavior does not make an external sink transactional or
+exactly-once; the application owns that sink's receipt and retry policy.
+
 ## Portable-record boundary
 
 `RunResult.to_record()`, CLI JSON, and SQLite storage deliberately omit arbitrary

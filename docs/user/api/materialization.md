@@ -6,6 +6,47 @@ to the core or automatically reuse outputs unless an asset declares an adapter a
 version. See [Materialization protocol](core.md#materialization-protocol) for the
 `Materialization`, `MaterializationContext`, and `MaterializationRecord` definitions.
 
+## Optional collection capability
+
+`MaterializationCollection` is a separate optional protocol exported from `kazeflow`.
+An adapter can implement it alongside `Materialization`:
+
+```python
+from collections.abc import Awaitable, Sequence
+
+from kazeflow import (
+    MaterializationCollection,
+    MaterializationContext,
+    MaterializationRecord,
+)
+
+
+class MyCollectionAdapter:
+    def available(
+        self, contexts: Sequence[MaterializationContext]
+    ) -> tuple[MaterializationRecord, ...] | Awaitable[tuple[MaterializationRecord, ...]]:
+        ...
+
+
+collection: MaterializationCollection = MyCollectionAdapter()
+```
+
+The protocol is structural. Existing adapters that only implement `resolve`,
+`load`, and `commit` remain valid. `available(contexts)` may be synchronous or
+asynchronous and returns committed records in the order of the explicit selection,
+omitting identities with no currently published record. It does not enumerate a
+store, infer keys from history, or automatically include prior runs. The core does
+not load, aggregate, publish, or change a run result during collection.
+
+`FileMaterialization.available` validates the whole non-text sequence and rejects
+duplicate exact identities before reading storage. It follows the same resolve
+semantics as a single lookup: missing or invalidated entries are omitted, while
+corrupt, unsupported, incompatible, or unreadable entries fail explicitly. Returned
+records remain subject to integrity and revocation checks when later passed to
+`load`; collection and load do not form a transaction or lock out concurrent writers.
+See the [partial aggregation example](../partitions.md#collect-available-outputs-after-a-partial-failure)
+for caller-owned aggregation after a failed run.
+
 ## Optional invalidation capability
 
 `MaterializationInvalidation` is a separate optional protocol exported from

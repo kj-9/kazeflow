@@ -259,6 +259,33 @@ The runnable
 commits an output, invalidates its identity, explicitly runs that partition again, and
 then confirms that the new generation is reused.
 
+### Collect available outputs after a partial failure
+
+Normal dependency behavior remains all-or-nothing: a consumer that depends on a
+failed partition does not run with an incomplete input. An application can instead
+make a separate, deliberate partial publication after the run has finished. The
+optional `MaterializationCollection` protocol and
+`FileMaterialization.available(contexts)` inspect only the exact contexts supplied
+by the caller. Construct them from a known selection, including prior-run identities
+only when the application intentionally chooses them; the adapter does not scan its
+root or reconstruct keys from run history.
+
+Collection preserves context order and returns committed records that are currently
+available. Missing and invalidated identities are skipped. Corrupt or incompatible
+selected records raise errors instead of silently shrinking the aggregate. Load the
+records explicitly before aggregation; invalidation between collection and load is
+still enforced by `load` and can reject a collected record. Collection and later
+loads are separate operations with no multi-record snapshot or locking guarantee,
+so coordinate writers and invalidation when a stable set matters.
+
+The [partial aggregation example](https://github.com/kj-9/kazeflow/blob/main/examples/available_materializations.py)
+keeps the producer's failed `RunResult`, collects selected committed outputs, and
+uses ordinary Python to aggregate them. It writes rows and a deterministic receipt
+containing the included materialization IDs to one local snapshot file using a
+temporary file and atomic replacement. Repeating the same selection produces the
+same publication ID. This example covers one local file; an external sink must
+define its own transaction, idempotency, and receipt behavior.
+
 ### Storage and compatibility boundary
 
 The adapter owns storage policy. `FileMaterialization` uses an explicit codec and a

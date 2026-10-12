@@ -49,3 +49,14 @@ uses `FileMaterialization`, its output generations and revocation ledger live un
 the explicitly configured materialization root; see
 [partition materialization and invalidation](../partitions.md#invalidate-one-materialization-explicitly).
 Treat both the SQLite database and the materialization root as application data.
+
+An application may also deliberately aggregate currently available outputs after a
+partially failed run. `FileMaterialization.available(contexts)` uses only the exact
+identities supplied by the caller; it does not scan the root, select prior runs, or
+reconstruct partition keys from SQLite history. The returned records can be loaded
+and invalidation is checked again at load time, so collection plus separate loads is
+not a transaction or a stable multi-record snapshot. The
+[partial aggregation example](../partitions.md#collect-available-outputs-after-a-partial-failure)
+keeps the failed run diagnostics and writes aggregate rows with a receipt to one
+replaceable local snapshot file. This local example does not define transaction or
+exactly-once behavior for external sinks.

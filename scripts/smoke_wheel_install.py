@@ -28,6 +28,7 @@ from kazeflow import (
     DatePartitionDef,
     Flow,
     FlowPlan,
+    MaterializationCollection,
     PartitionGroup,
     Materialization,
     MaterializationContext,
@@ -47,6 +48,7 @@ from kazeflow.file_materialization import (
 
 side_effects = []
 assert Materialization is not None
+assert MaterializationCollection is not None
 assert MaterializationContext is not None
 assert MaterializationRecord is not None
 assert MaterializationInvalidation is not None
@@ -69,6 +71,8 @@ with tempfile.TemporaryDirectory(prefix="kazeflow-file-materialization-") as tem
     resolved = adapter.resolve(context)
     assert resolved == committed
     assert adapter.load(resolved) == {"answer": [42]}
+    assert adapter.available((context,)) == (committed,)
+    assert adapter.available(()) == ()
     try:
         JsonCodec().encode((42,))
     except (TypeError, ValueError):
@@ -181,10 +185,19 @@ with tempfile.TemporaryDirectory(prefix="kazeflow-invalidation-") as temporary:
     old_id = before_invalidation.tasks[0].attempts[0].materialization_id
     assert old_id
     assert invalidation_store.inspect(invalidation_context).status == "available"
+    previously_collected = invalidation_store.available((invalidation_context,))
+    assert previously_collected == (invalidation_store.resolve(invalidation_context),)
     invalidation_store.invalidate(
         invalidation_context, reason="wheel smoke correction"
     )
     assert invalidation_store.inspect(invalidation_context).status == "invalidated"
+    assert invalidation_store.available((invalidation_context,)) == ()
+    try:
+        invalidation_store.load(previously_collected[0])
+    except FileMaterializationError:
+        pass
+    else:
+        raise AssertionError("load must reject a collected record invalidated later")
 
     rebuilt = asyncio.run(invalidation_flow.run_async(invalidation_config))
     rebuilt_attempt = rebuilt.tasks[0].attempts[0]

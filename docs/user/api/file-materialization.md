@@ -17,7 +17,7 @@ from kazeflow.file_materialization import (
     JsonCodec,
     MaterializationCodec,
 )
-from kazeflow import MaterializationInvalidation
+from kazeflow import MaterializationCollection, MaterializationInvalidation
 ```
 
 `FileMaterialization(root: str | Path, *, codec: MaterializationCodec)` implements
@@ -26,6 +26,22 @@ operations. Supply a codec explicitly; the adapter never chooses a serializer fo
 you. A codec exposes a stable string `codec_id`, `encode(output) -> bytes`, and
 `decode(payload: bytes) -> Any` methods. The executor runs synchronous adapter
 operations in worker threads.
+
+The adapter also implements the optional `MaterializationCollection` protocol with
+`available(contexts) -> tuple[MaterializationRecord, ...]`. Supply a finite, explicit
+non-text sequence of exact `MaterializationContext` identities. The adapter validates
+all contexts and duplicate identities before it reads storage, and returns committed
+records in selection order. An empty sequence returns immediately. It never scans the
+root, reconstructs keys from run history, or adds prior-run outputs unless their
+contexts were supplied explicitly.
+
+Missing and invalidated identities are omitted, matching `resolve`. Corrupt,
+unsupported, incompatible, or unreadable selected entries raise
+`FileMaterializationError` rather than being silently excluded. The returned records
+are metadata only; call `load(record)` to decode each output. A later invalidation is
+checked again by `load`, and a multi-record collection followed by separate loads is
+not one storage snapshot. Applications that need a stable set must coordinate
+concurrent writers and invalidation.
 
 `JsonCodec()` has codec ID `kazeflow.json.v1`. It accepts exact JSON built-in
 values: `None`, booleans, integers, finite floats, strings, lists, and dictionaries
@@ -153,3 +169,7 @@ producer while retrying the failed downstream work.
 See the [invalidation example on GitHub](https://github.com/kj-9/kazeflow/blob/main/examples/materialization_invalidation.py)
 for a commit, explicit revocation, deliberate rebuild, and reuse of the new
 generation.
+
+See the [partial aggregation example on GitHub](https://github.com/kj-9/kazeflow/blob/main/examples/available_materializations.py)
+for an explicit selection, partial availability after a producer failure, and a
+single-file snapshot that stores aggregate rows with their publication receipt.
