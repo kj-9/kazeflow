@@ -11,7 +11,7 @@ and `build_flow_plan()`.  `PlanConfig` SHALL contain `max_concurrency` and the
 optional selected `partition_keys`; `TaskPlan` SHALL contain a task name, its
 direct dependency names, and its partition selection; and `FlowPlan` SHALL
 contain the canonical selected targets, the ordered task plans, and the
-normalized plan configuration.  All three model values SHALL be immutable
+normalized plan configuration, optional resource summaries and a tuple of selected PartitionGroup values as partition_groups (default empty).  All three model values SHALL be immutable
 after construction, and every sequence exposed by them SHALL be a tuple.
 `FlowPlan.targets` SHALL be the lexicographically sorted tuple of directly
 selected target names, not the transitive closure and not the caller's input
@@ -140,3 +140,39 @@ every selected partitioned task.
 - **WHEN** the supplied sequence contains `None`, an unhashable value, or two
   keys equal under Python equality
 - **THEN** `build_flow_plan()` raises `ValueError`
+
+### Requirement: Plans expose resolved resource constraints
+An immutable `FlowPlan` SHALL expose the names and positive concurrency limits of resources used by its selected dependency closure, and each `TaskPlan` SHALL expose its selected asset's resource name or absence. Equivalent flow definitions SHALL produce equivalent, deterministically ordered resource planning data. Planning SHALL not acquire capacity, invoke asset bodies, or create execution state.
+
+#### Scenario: Inspect a shared resource before execution
+- **WHEN** two selected tasks declare the same resource and a caller requests a plan
+- **THEN** the caller can inspect one resource limit and both task associations without either task running
+
+#### Scenario: Unused resource
+- **WHEN** a flow declares a resource not used by its selected closure
+- **THEN** the plan omits it from the selected-work resource summary
+
+#### Scenario: No resources
+- **WHEN** a flow and its selected assets declare no resources
+- **THEN** the plan retains the existing target, task, partition, and global-concurrency meaning with an empty resource summary
+
+### Requirement: Plans expose materialization participation without storage lookup
+Each selected task in `FlowPlan` SHALL expose whether its asset has an explicit materialization declaration. Planning SHALL validate materialization configuration and dependency eligibility without calling resolve, load, commit, or an asset body. The plan SHALL not claim a cache hit or predict a reusable record.
+
+#### Scenario: Side-effect-free participation inspection
+- **WHEN** a caller plans a flow containing a materialized partitioned asset
+- **THEN** the task plan identifies its participation and no adapter storage operation occurs
+
+### Requirement: Plans expose selected resource rate limits
+An immutable FlowPlan SHALL expose the start count and duration of each selected resource's optional rate limit. Absence SHALL be explicit in structured metadata. Equivalent definitions SHALL produce deterministic metadata, and planning SHALL not acquire permits, resolve materializations, or invoke bodies.
+
+#### Scenario: Side-effect-free rate inspection
+- **WHEN** a caller plans a rate-limited materialized flow
+- **THEN** the limit is visible without adapter access or asset execution
+
+### Requirement: Selected retry policies are inspectable without execution
+Selected resource summaries SHALL include the maximum invocation count and whether a classifier is enabled, without executing or serializing the classifier. Malformed declarations SHALL fail planning before any events or body execution. Policies not selected SHALL remain absent from selected summaries.
+
+#### Scenario: Inspect retry budget
+- **WHEN** a selected resource declares a classifier and a maximum of three invocations
+- **THEN** its immutable plan reports three and classifier-enabled true without calling the classifier

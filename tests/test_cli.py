@@ -29,9 +29,16 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, str,
 
 def _json_data(stdout: str, document_type: str) -> dict[str, Any]:
     document = json.loads(stdout)
+    versions = {
+        "kazeflow.plan": 5,
+        "kazeflow.run-result": 4,
+        "kazeflow.runs-list": 4,
+        "kazeflow.runs-show": 4,
+        "kazeflow.runs-compare": 4,
+    }
     assert document == {
         "document_type": document_type,
-        "schema_version": 1,
+        "schema_version": versions.get(document_type, 1),
         "data": document["data"],
     }
     return document["data"]
@@ -245,6 +252,7 @@ flow = Flow(['publish'])
         {
             "name": "publish",
             "dependencies": [],
+            "resource": None,
             "partition_selection": {
                 "kind": "keys",
                 "domain": "date",
@@ -322,6 +330,77 @@ flow = Flow(['publish'])
         "  task_1 -> task_2;",
         "}",
     ]
+
+
+def test_plan_text_shows_selected_resources_and_omits_empty_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "resources.py",
+        """
+from kazeflow import Flow, RateLimit, ResourcePolicy, asset
+
+@asset(resource="network")
+def fetch():
+    raise AssertionError("asset body must not run")
+
+@asset(resource="network")
+def publish(fetch):
+    raise AssertionError("asset body must not run")
+
+flow = Flow(["publish"], resources={"network": ResourcePolicy(max_concurrency=2, rate_limit=RateLimit(4, 2))})
+""",
+    )
+    status, stdout, stderr = _run(capsys, ["plan", str(entry)])
+
+    assert status == 0
+    assert stderr == ""
+    assert "Resources:\n  network: max concurrency 2 invocations" in stdout
+    assert "rate limit: 4 asset body invocation starts per 2 seconds per run" in stdout
+    assert "  fetch [resource: network]" in stdout
+    assert "fetch --> publish [resource: network] *" in stdout
+
+    no_resource = _script(
+        tmp_path,
+        "plain.py",
+        "from kazeflow import Flow, asset\n@asset\ndef plain(): pass\nflow = Flow(['plain'])\n",
+    )
+    status, stdout, stderr = _run(capsys, ["plan", str(no_resource)])
+    assert status == 0
+    assert stderr == ""
+    assert "Resources:" not in stdout
+
+
+def test_plan_text_shows_declared_partition_groups(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = _script(
+        tmp_path,
+        "grouped.py",
+        """
+from kazeflow import DatePartitionDef, Flow, PartitionGroup, asset
+
+@asset(partition_def=DatePartitionDef())
+def extract():
+    raise AssertionError("asset body must not run")
+
+@asset(partition_def=DatePartitionDef())
+def transform(extract):
+    raise AssertionError("asset body must not run")
+
+flow = Flow(["transform"], partition_groups=[PartitionGroup(("extract", "transform"), max_active_keys=2)])
+""",
+    )
+
+    status, stdout, stderr = _run(
+        capsys, ["plan", str(entry), "--partition-key", "2026-08-11"]
+    )
+
+    assert status == 0
+    assert stderr == ""
+    assert "Partition groups:\n  extract -> transform: max active keys 2" in stdout
+    assert "2026-08-11" not in stdout
 
 
 def test_plan_verbose_is_text_only_and_keeps_partition_keys_private(
@@ -636,12 +715,132 @@ def publish():
 
     assert status == 0
     run = _json_data(stdout, "kazeflow.run-result")
-    assert run["record_schema_version"] == 1
+    assert run["record_schema_version"] == 4
     record = run["record"]
     assert record["status"] == "success"
     assert "raw output must not be serialized" not in stdout
     assert "Planned run:" in stderr
     assert "Run result:" not in stderr
+
+
+def test_run_and_saved_history_report_executed_then_reused_provenance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "materialized.json"
+    entry = _script(
+        tmp_path,
+        "materialized.py",
+        f"""
+import json
+from pathlib import Path
+from kazeflow import DatePartitionDef, MaterializationRecord, asset
+
+marker = Path({str(marker)!r})
+materialization_id = "opaque-application-id"
+
+def record(context):
+    return MaterializationRecord(
+        materialization_id=materialization_id,
+        asset_name=context.asset_name,
+        version=context.version,
+        partition_domain=context.partition_domain,
+        partition_key_present=context.partition_key_present,
+        partition_key=context.partition_key,
+        input_materialization_ids=context.input_materialization_ids,
+        committed=True,
+    )
+
+class Adapter:
+    def resolve(self, context):
+        return record(context) if marker.exists() else None
+
+    def load(self, candidate):
+        return "loaded from materialization"
+
+    def commit(self, context, output):
+        marker.write_text(json.dumps(output), encoding="utf-8")
+        return record(context)
+
+@asset(partition_def=DatePartitionDef(), version="v1", materialization=Adapter())
+def publish():
+    return "executed once"
+""",
+    )
+    database = tmp_path / "provenance.sqlite3"
+
+    status, stdout, _stderr = _run(
+        capsys,
+        [
+            "run",
+            str(entry),
+            "--yes",
+            "--partition-key",
+            "2026-08-12",
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+    assert status == 0
+    executed = _json_data(stdout, "kazeflow.run-result")
+    first_id = executed["record"]["run_id"]
+    first_attempt = executed["record"]["tasks"][0]["attempts"][0]
+    assert first_attempt["resolution"] == "executed"
+    assert first_attempt["materialization_id"] == "opaque-application-id"
+
+    status, stdout, _stderr = _run(
+        capsys,
+        [
+            "run",
+            str(entry),
+            "--yes",
+            "--partition-key",
+            "2026-08-12",
+            "--store",
+            str(database),
+            "--format",
+            "json",
+        ],
+    )
+    assert status == 0
+    reused = _json_data(stdout, "kazeflow.run-result")
+    second_id = reused["record"]["run_id"]
+    second_attempt = reused["record"]["tasks"][0]["attempts"][0]
+    assert second_attempt["resolution"] == "materialized"
+    assert second_attempt["materialization_id"] == "opaque-application-id"
+
+    status, stdout, stderr = _run(
+        capsys,
+        ["runs", "show", second_id, "--store", str(database), "--format", "json"],
+    )
+    assert status == 0
+    assert stderr == ""
+    shown = _json_data(stdout, "kazeflow.runs-show")
+    saved_attempt = shown["record"]["tasks"][0]["attempts"][0]
+    assert saved_attempt["resolution"] == "materialized"
+    assert saved_attempt["materialization_id"] == "opaque-application-id"
+    with SQLiteRunStore(database) as store:
+        assert (
+            json.loads(store.load(first_id).record_json)["tasks"][0]["attempts"][0][
+                "resolution"
+            ]
+            == "executed"
+        )
+        assert (
+            json.loads(store.load(second_id).record_json)["tasks"][0]["attempts"][0][
+                "resolution"
+            ]
+            == "materialized"
+        )
+
+    status, stdout, _stderr = _run(
+        capsys,
+        ["run", str(entry), "--yes", "--partition-key", "2026-08-12", "--verbose"],
+    )
+    assert status == 0
+    assert "resolution: materialized" in stdout
+    assert "materialization_id: opaque-application-id" in stdout
 
 
 def test_run_reports_asset_failure_as_completed_json_result(
@@ -971,7 +1170,7 @@ def publish():
     assert stderr == ""
     history = _json_data(stdout, "kazeflow.runs-list")
     assert history["runs"][0]["run_id"] == run_id
-    assert history["runs"][0]["record_schema_version"] == 1
+    assert history["runs"][0]["record_schema_version"] == 4
     assert history["runs"][0]["status"] == "success"
     assert history["runs"][0]["saved_at"].endswith("+00:00")
 
@@ -1023,7 +1222,7 @@ def publish():
     assert stderr == ""
     shown = _json_data(stdout, "kazeflow.runs-show")
     assert shown["run_id"] == success_id
-    assert shown["record_schema_version"] == 1
+    assert shown["record_schema_version"] == 4
     assert shown["store_schema_version"] == 1
     assert shown["record"]["tasks"][0]["attempts"][0]["attempt"]["partition"] == {
         "present": False

@@ -36,6 +36,12 @@ the same values; stored records are not automatically redacted. See the
 For the typed JSON envelopes, distinct CLI/record/store versions, schemas, and
 ordering guarantees, use the [JSON automation contract](json.md).
 
+History JSON uses schema version 4. Each listed or shown run reports its own
+portable record version, so a store schema v1 database can return a mixture of
+record v1 through v4 rows without rewriting older runs. New saves use record v4,
+which includes successful resolution and materialization IDs. Viewing history only
+displays the saved metadata; it does not contact the adapter or load artifacts.
+
 ```console
 $ kazeflow runs list
 Stored runs:

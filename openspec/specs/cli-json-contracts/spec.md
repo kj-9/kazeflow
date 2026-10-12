@@ -4,7 +4,9 @@
 
 Define versioned, typed JSON documents for every machine-readable CLI outcome so
 automation can identify, validate, and safely consume results without parsing text.
+
 ## Requirements
+
 ### Requirement: Typed machine-readable CLI envelope
 Every completed `--format json` CLI outcome SHALL write one JSON object with exactly
 the top-level fields `document_type`, `schema_version`, and `data`. `document_type`
@@ -128,3 +130,26 @@ successful JSON document to stdout and SHALL write their diagnostics to stderr.
 - **WHEN** a selected persistence or presentation adapter fails
 - **THEN** the command exits `4`, writes diagnostics to stderr, and emits no
   successful JSON document to stdout
+
+### Requirement: Resource-aware plan documents use a new schema version
+Every emitted `kazeflow.plan` document SHALL use schema version 5 with selected-resource summaries, task associations, nullable rate limit, maximum invocations and classifier-enabled metadata. Empty resources and null associations SHALL be explicit. Run-result, runs-list, runs-show and runs-compare documents SHALL use version 4 with run-result portable record version 4 and stored-record versions 1–4. Version 4 SHALL preserve circuit reasons and invocation history and expose successful materialization provenance. Other document types SHALL retain version 1; SQLite database version SHALL remain 1. Its partition_groups array SHALL contain ordered assets and max_active_keys for each selected group, including an explicit empty array when none are selected. Published schema collection v7 SHALL describe the current matrix. Historical schema collections v1–v6 and goldens SHALL remain unchanged. Release documentation SHALL explain migration.
+
+#### Scenario: Resource-aware plan
+- **WHEN** an automation requests a JSON plan for shared-resource assets
+- **THEN** it receives a version 5 plan with concurrency, nullable rate limit and associations
+
+#### Scenario: No resources
+- **WHEN** a JSON plan has no selected resources
+- **THEN** it has empty resource summaries and null associations
+
+#### Scenario: No rate limit
+- **WHEN** a selected resource has only a concurrency bound
+- **THEN** its plan contains an explicit null rate limit
+
+#### Scenario: Provenance in run and stored history
+- **WHEN** JSON run succeeds using committed or reused materialization
+- **THEN** version 4 documents carry record version 4 metadata and history can also show unchanged older records
+
+#### Scenario: Group-aware plan
+- **WHEN** a grouped flow is inspected with JSON plan
+- **THEN** version5 exposes group members and active-key limits without raw keys

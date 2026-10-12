@@ -25,14 +25,38 @@ missing history database. Use `--store PATH` to read another existing file.
 ## Know the portable boundary
 
 The SQLite adapter stores run/task/attempt order, terminal statuses, UTC timestamps,
-durations, skip reasons, blockers, and portable failure metadata. It deliberately
-omits raw task outputs, exception objects, and the dedicated raw partition-key field.
+durations, skip reasons, blockers, portable failure metadata, and record v4
+successful resolution and materialization IDs. It deliberately omits raw task
+outputs, exception objects, and the dedicated raw partition-key field. Database
+schema v1 is unchanged; each row records its portable record version, and new saves
+use record v4.
 
 This is not a confidentiality or redaction guarantee. Exception messages and
 tracebacks are stored as portable failure metadata and can contain partition keys,
 paths, queries, or other application-controlled values. Protect the database as
 diagnostic data and review the
 [portable-record trust boundary](../concepts/trust-boundary.md#portable-record-boundary).
+Materialization IDs are opaque adapter-defined strings, may contain application
+information, and are not automatically redacted. Reading history displays the saved
+ID without contacting the adapter or loading the artifact.
 
 See [Results and history](../results.md) for the record model and
 [SQLiteRunStore](../api/sqlite.md) for the direct Python API.
+
+SQLite run history and file materialization storage are separate. Saving or deleting
+a run record does not commit, invalidate, or remove an asset output. If an application
+uses `FileMaterialization`, its output generations and revocation ledger live under
+the explicitly configured materialization root; see
+[partition materialization and invalidation](../partitions.md#invalidate-one-materialization-explicitly).
+Treat both the SQLite database and the materialization root as application data.
+
+An application may also deliberately aggregate currently available outputs after a
+partially failed run. `FileMaterialization.available(contexts)` uses only the exact
+identities supplied by the caller; it does not scan the root, select prior runs, or
+reconstruct partition keys from SQLite history. The returned records can be loaded
+and invalidation is checked again at load time, so collection plus separate loads is
+not a transaction or a stable multi-record snapshot. The
+[partial aggregation example](../partitions.md#collect-available-outputs-after-a-partial-failure)
+keeps the failed run diagnostics and writes aggregate rows with a receipt to one
+replaceable local snapshot file. This local example does not define transaction or
+exactly-once behavior for external sinks.

@@ -18,6 +18,7 @@ from .results import FlowStatus, RunResult
 
 
 CURRENT_SCHEMA_VERSION = 1
+CURRENT_RECORD_SCHEMA_VERSION = 4
 _TERMINAL_FLOW_STATUSES = frozenset(
     {FlowStatus.SUCCESS.value, FlowStatus.FAILED.value, FlowStatus.CANCELLED.value}
 )
@@ -44,9 +45,9 @@ class StoredRunSummary:
         if (
             isinstance(self.schema_version, bool)
             or not isinstance(self.schema_version, int)
-            or self.schema_version <= 0
+            or self.schema_version not in (1, 2, 3, CURRENT_RECORD_SCHEMA_VERSION)
         ):
-            raise ValueError("schema_version must be a positive integer")
+            raise ValueError("schema_version must be a supported record version")
         if (
             not isinstance(self.status, str)
             or self.status not in _TERMINAL_FLOW_STATUSES
@@ -63,12 +64,16 @@ class StoredRunRecord(StoredRunSummary):
 
     def __post_init__(self) -> None:
         StoredRunSummary.__post_init__(self)
-        _decode_portable_run_record(self.record_json, self.run_id, self.status)
+        _decode_portable_run_record(
+            self.record_json, self.run_id, self.status, self.schema_version
+        )
 
     @property
     def record(self) -> dict[str, object]:
         """Return a new decoded copy of the portable, deliberately lossy record."""
-        return _decode_portable_run_record(self.record_json, self.run_id, self.status)
+        return _decode_portable_run_record(
+            self.record_json, self.run_id, self.status, self.schema_version
+        )
 
 
 class SQLiteRunStore:
@@ -114,7 +119,7 @@ class SQLiteRunStore:
         if not isinstance(result, RunResult):
             raise TypeError("result must be a RunResult")
 
-        record = result.to_record()
+        record = result.to_record(schema_version=CURRENT_RECORD_SCHEMA_VERSION)
         record_json = json.dumps(
             record,
             allow_nan=False,
@@ -125,7 +130,7 @@ class SQLiteRunStore:
         saved_at = datetime.now(timezone.utc)
         stored = StoredRunRecord(
             run_id=result.run_id,
-            schema_version=CURRENT_SCHEMA_VERSION,
+            schema_version=CURRENT_RECORD_SCHEMA_VERSION,
             status=result.status.value,
             saved_at=saved_at,
             record_json=record_json,
@@ -340,8 +345,14 @@ def _validate_utc_timestamp(value: object, field_name: str) -> None:
 
 
 def _decode_portable_run_record(
-    record_json: str, run_id: str, status: str
+    record_json: str, run_id: str, status: str, schema_version: int
 ) -> dict[str, object]:
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in (1, 2, 3, CURRENT_RECORD_SCHEMA_VERSION)
+    ):
+        raise ValueError("stored run record has an unsupported record version")
     if not isinstance(record_json, str):
         raise ValueError("record_json must be a JSON object string")
     try:
@@ -354,7 +365,148 @@ def _decode_portable_run_record(
         raise ValueError("stored run record does not match its envelope")
     if not isinstance(decoded["tasks"], list):
         raise ValueError("stored run record tasks must be a list")
+    if schema_version == 1 and _record_contains_invocations(decoded):
+        raise ValueError("version 1 run records cannot contain invocation history")
+    if schema_version in (2, 3, 4) and not _record_contains_v2_attempt_shapes(decoded):
+        raise ValueError(
+            f"version {schema_version} run records must include invocation arrays"
+        )
+    _validate_record_skip_reasons(decoded, schema_version)
+    _validate_record_provenance(decoded, schema_version)
     return decoded
+
+
+def _validate_record_provenance(record: dict[str, object], version: int) -> None:
+    """Validate v4 provenance without inventing it for historical attempts."""
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        attempts = task.get("attempts")
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            has_resolution = "resolution" in attempt
+            has_id = "materialization_id" in attempt
+            if version < 4:
+                if has_resolution or has_id:
+                    raise ValueError(
+                        f"version {version} run records cannot contain provenance"
+                    )
+                continue
+
+            if not has_resolution or not has_id:
+                raise ValueError(
+                    "version 4 run record attempts require provenance fields"
+                )
+            resolution = attempt["resolution"]
+            materialization_id = attempt["materialization_id"]
+            status = attempt.get("status")
+            if resolution is not None and (
+                not isinstance(resolution, str)
+                or resolution not in {"executed", "materialized"}
+            ):
+                raise ValueError("version 4 run record has an invalid resolution")
+            if materialization_id is not None and (
+                not isinstance(materialization_id, str) or not materialization_id
+            ):
+                raise ValueError(
+                    "version 4 run record materialization_id must be a non-empty string"
+                )
+            if status == "success":
+                if resolution is None and materialization_id is not None:
+                    raise ValueError(
+                        "version 4 run record materialization_id requires a resolution"
+                    )
+                if resolution == "materialized" and materialization_id is None:
+                    raise ValueError(
+                        "version 4 materialized attempts require a materialization_id"
+                    )
+            elif resolution is not None or materialization_id is not None:
+                raise ValueError(
+                    "version 4 non-success attempts cannot contain provenance"
+                )
+
+
+def _validate_record_skip_reasons(record: dict[str, object], version: int) -> None:
+    allowed = {None, "dependency_blocked", "no_partition_keys"}
+    if version in (3, 4):
+        allowed |= {"resource_circuit_open", "mixed_blocked"}
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        task_reason = task.get("reason")
+        if task_reason is not None and (
+            not isinstance(task_reason, str) or task_reason not in allowed
+        ):
+            raise ValueError(f"version {version} run record has an invalid task reason")
+        if task_reason in {"resource_circuit_open", "mixed_blocked"}:
+            if task.get("status") != "skipped":
+                raise ValueError("blocked task records must have skipped status")
+            blockers = task.get("blocked_by")
+            if not isinstance(blockers, list) or not blockers:
+                raise ValueError("blocked task records require blockers")
+        attempts = task.get("attempts")
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            reason = attempt.get("reason")
+            if reason is not None and (
+                not isinstance(reason, str)
+                or reason not in allowed
+                or reason in {"no_partition_keys", "mixed_blocked"}
+            ):
+                raise ValueError(
+                    f"version {version} run record has an invalid attempt reason"
+                )
+            blockers = attempt.get("blocked_by")
+            if reason in {"dependency_blocked", "resource_circuit_open"}:
+                if not isinstance(blockers, list) or not blockers:
+                    raise ValueError("blocked attempt records require blockers")
+            if reason == "resource_circuit_open" and len(blockers) != 1:
+                raise ValueError("circuit-blocked attempt records require one blocker")
+            if reason == "resource_circuit_open" and attempt.get("status") != "skipped":
+                raise ValueError("circuit-blocked attempt records must be skipped")
+
+
+def _record_contains_invocations(record: dict[str, object]) -> bool:
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task_value in tasks:
+        if not isinstance(task_value, dict):
+            continue
+        attempts = task_value.get("attempts")
+        if isinstance(attempts, list) and any(
+            isinstance(attempt, dict) and "invocations" in attempt
+            for attempt in attempts
+        ):
+            return True
+    return False
+
+
+def _record_contains_v2_attempt_shapes(record: dict[str, object]) -> bool:
+    tasks = record["tasks"]
+    assert isinstance(tasks, list)
+    for task_value in tasks:
+        if not isinstance(task_value, dict):
+            return False
+        attempts = task_value.get("attempts")
+        if not isinstance(attempts, list):
+            return False
+        if any(
+            not isinstance(attempt, dict)
+            or not isinstance(attempt.get("invocations"), list)
+            for attempt in attempts
+        ):
+            return False
+    return True
 
 
 def _first_sql_keyword(statement: str) -> str:

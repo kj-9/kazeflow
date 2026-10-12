@@ -1,6 +1,6 @@
 # kazeflow Roadmap
 
-> Status: M0–M17 Complete; M18 planned
+> Status: M0–M17 Complete; Issue #1・#2 follow-ups implemented; 0.1.0a5 release prepared; M18 deferred
 
 この状態はroadmap上のmilestone完了を示すものであり、[GOAL.md](./GOAL.md)のproject goalを
 固定または完了にするものではない。
@@ -43,7 +43,49 @@ core-only/TUI-enabledのwheel smoke testとpackage metadata検証をrelease chec
 - M16: definition-ownedなPartition key正規化、strict date/range selection、domain互換性検証、非実行inspection CLIを実装済み。
 - M17: typed CLI JSON envelope、公開JSON Schema、golden compatibility evidence、JSON stream分離を実装済み。
 
-## Next direction: Make documentation trustworthy by construction
+## Current priority: Complete Issue #1 and Issue #2
+
+2026-10-11のユーザー指示により、Issue [#1](https://github.com/kj-9/kazeflow/issues/1)と
+[#2](https://github.com/kj-9/kazeflow/issues/2)の残タスクをM18・M19より優先する。
+archive済みchangeの完了とIssue全体の完了を区別する。検証済みの変更は適切な粒度でコミットし、
+既存のローカル差分を保持したうえでレビュー・統合する。
+
+完了した基礎契約:
+
+- #1: `add-flow-scoped-resource-concurrency` — run内のresource共有並行数、plan表示、plan JSON v2。
+- #1: `add-flow-scoped-resource-rate-limit` — run内のresource共有開始数上限、slotを占有しない待機、plan JSON v3。
+- #1: `add-resource-retry-cooldown` — bounded retry、共有cooldown、番号付きinvocation履歴、CLI plan v4/run・history v2。
+- #1: `add-resource-circuit-breaker` — 明示OpenCircuit、最初の原因attempt、pending/retry skip、実行中work・materialization hitの維持。
+- #1: `add-partition-outcome-queries` — terminal failed/circuit-skipped key取得、元keyの順序・identity、明示的新規run selection。
+- #2: `add-partition-materialization-reuse` — 明示adapter、version/input ID照合、commit後の下流公開、in-memory provenance。
+- #2: `add-file-materialization-adapter` — 明示codec、manifest整合性検証、atomic publication、別プロセスでの再利用。
+- #2: `record-materialization-provenance` — portable result/event/CLI v4、SQLiteの混在record、commit/reuseのIDと実行方法。
+- #2: `add-materialization-invalidation` — exact identityのepoch ledger、旧artifact復元の拒否、明示的rebuild、診断inspection。
+- #2: `add-depth-first-partition-groups` — 明示asset列のactive key cap、depth-first admission、plan JSON v5と既存result順序の維持。
+- #2: `add-available-materialization-aggregation` — 明示contextのcommitted成果物collection、失敗診断を保持した部分集約、単一local snapshotとreceipt。
+- #1: `add-resource-execution-statistics` — actual body/commitの実行・成否・retry、観測resource admission待機、live result統計lookup。
+
+次の順序を基準に、各範囲を独立したOpenSpec changeで扱う。未完了のchange名は予定名。Issue #1・#2の必須追加機能は実装・検証済み。2026-10-12にGitHub反映・CI成功後のmerge/closeを承認済み。統合・公開の実行結果は対応PR、Issue、GitHub releaseを正本として参照する。
+
+| 順序 | Issue | Change | 完了条件・依存関係 |
+| --- | --- | --- | --- |
+| 1 | #1 | `add-flow-scoped-resource-rate-limit` | 2026-10-11完了・archive済み。共有時間窓、待機中のslot解放、materialization hitとの整合を検証。 |
+| 2 | #2 | `add-file-materialization-adapter` | 2026-10-11完了・archive済み。明示codec、manifest、atomic publish、fresh process再利用と停止点のexampleを検証。 |
+| 3 | #1 | `add-resource-retry-cooldown` | 2026-10-11完了・archive済み。classifier、permit再取得、slotを占有しない待機、共有cooldown、versioned result/event契約を検証。 |
+| 4 | #1 | `add-resource-circuit-breaker` | 2026-10-11完了・archive済み。回復不能エラーの明示分類、原因attempt付きskip、実行中work・materialization hit、versioned record/eventを検証。 |
+| 5 | #1 | `add-partition-outcome-queries` | 2026-10-12完了・archive済み。failed/circuit-skipped key取得、falsey/opaque key、unknown/unpartitioned taskの診断、明示的rerunを検証。 |
+| 6 | #2 | `record-materialization-provenance` | 2026-10-12完了・archive済み。executed/materializedとIDをportable result/event/CLI v4へ反映。SQLite DB v1とrecord v1–v4の混在、retryとの整合を検証。 |
+| 7 | #2 | `add-materialization-invalidation` | 2026-10-12完了・archive済み。明示invalidation/epoch ledger、互換性・破損診断、ledger保持下の旧artifact復活防止とrebuildを検証。 |
+| 8 | #2 | `add-depth-first-partition-groups` | 2026-10-12完了・archive済み。同一keyの明示asset列、active key数上限、retry/circuit/materializationとdependency/result orderingの整合を検証。 |
+| 9 | #2 | `add-available-materialization-aggregation` | 2026-10-12完了・archive済み。明示current/prior identityのavailable records、失敗を保った集約、単一atomic snapshot/receiptと停止点を検証。 |
+| 10 | #1 | `add-resource-execution-statistics` | 2026-10-12完了・archive済み。actual invocationとretry、観測admission waitの集計・計測範囲、portable非変更を検証。 |
+
+executor、共有model、同じcapabilityのsync/archiveは直列ownerとする。
+adapterと専用tests、固定されたAPIに対するDocs・調査はfile ownershipを分離して並列化できる。
+各changeのspec gateでAPIとfailure semanticsを固定し、scope変更が必要ならIssueの完了範囲へ反映案を示す。
+両Issueの完了判断は上記機能の受入条件と公開example、統合後のCIで行う。
+
+## Deferred direction: Make documentation trustworthy by construction
 
 M14で情報を発見できる構造は整った。次は、公開説明と実装の一致を人手の注意だけに依存させず、
 誤ったcommand、古いsignature、過剰な安全性表現をCIで検出できる状態へ進める。

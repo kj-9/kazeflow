@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kj-9.github.io/kazeflow/schemas/cli/v3/schema.json",
+  "title": "kazeflow plan JSON document, version 3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_type",
+    "schema_version",
+    "data"
+  ],
+  "properties": {
+    "document_type": {
+      "const": "kazeflow.plan"
+    },
+    "schema_version": {
+      "const": 3
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targets",
+        "resources",
+        "config",
+        "tasks"
+      ],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "max_concurrency",
+              "rate_limit"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "max_concurrency": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "rate_limit": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "requests",
+                      "per_seconds"
+                    ],
+                    "properties": {
+                      "requests": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "per_seconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_concurrency",
+            "partition_selection"
+          ],
+          "properties": {
+            "max_concurrency": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "partition_selection": {
+              "$ref": "#/$defs/partitionSelection"
+            }
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "dependencies",
+              "resource",
+              "partition_selection"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dependencies": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "resource": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "partition_selection": {
+                "$ref": "#/$defs/partitionSelection"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "partitionSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "domain",
+        "count"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "omitted",
+            "keys",
+            "range",
+            "empty",
+            "unpartitioned"
+          ]
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

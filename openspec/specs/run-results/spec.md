@@ -8,7 +8,7 @@ record projections.
 ### Requirement: Core exposes exact immutable result value types
 The core SHALL expose frozen, slot-based dataclasses named `TaskReference`,
 `AttemptReference`, `FailureInfo`, `AttemptResult`, `TaskResult`, and `RunResult`,
-plus `str`-backed enums `FlowStatus`, `AttemptStatus`, and `SkipReason`.  Their
+plus `str`-backed enums `FlowStatus`, `AttemptStatus`, and `SkipReason`. Their
 fields, types, and defaults SHALL be exactly those listed below:
 
 ```text
@@ -17,7 +17,9 @@ FlowStatus: PENDING="pending", RUNNING="running", SUCCESS="success",
 AttemptStatus: PENDING="pending", RUNNING="running", SUCCESS="success",
                FAILED="failed", SKIPPED="skipped", CANCELLED="cancelled"
 SkipReason: DEPENDENCY_BLOCKED="dependency_blocked",
-            NO_PARTITION_KEYS="no_partition_keys"
+            NO_PARTITION_KEYS="no_partition_keys",
+            RESOURCE_CIRCUIT_OPEN="resource_circuit_open",
+            MIXED_BLOCKED="mixed_blocked"
 TaskReference(task_name: str)
 AttemptReference(task: TaskReference, partition_key_present: bool = False,
                  partition_key: object | None = None)
@@ -27,7 +29,10 @@ AttemptResult(attempt: AttemptReference, status: AttemptStatus,
               output: object = None, exception: BaseException | None = None,
               failure: FailureInfo | None = None,
               reason: SkipReason | None = None,
-              blocked_by: tuple[AttemptReference, ...] = ())
+              blocked_by: tuple[AttemptReference, ...] = (),
+              resolution: str | None = None,
+              materialization_id: str | None = None,
+              invocations: tuple[InvocationResult, ...] = ())
 TaskResult(task: TaskReference, is_partitioned: bool, status: AttemptStatus,
            started_at: datetime, ended_at: datetime, duration: timedelta,
            attempts: tuple[AttemptResult, ...] = (),
@@ -35,13 +40,16 @@ TaskResult(task: TaskReference, is_partitioned: bool, status: AttemptStatus,
            blocked_by: tuple[AttemptReference, ...] = ())
 RunResult(run_id: str, status: FlowStatus, started_at: datetime,
           ended_at: datetime, duration: timedelta,
-          tasks: tuple[TaskResult, ...] = ())
+          tasks: tuple[TaskResult, ...] = (),
+          resources: tuple[ResourceStatistics, ...] = ())
 ```
 
-`TaskReference.task_name` and `RunResult.run_id` SHALL be non-empty strings.  An
+`resolution` SHALL be `executed` or `materialized` for executor-produced successful attempts and `None` for other statuses. Manually constructed successful attempts MAY retain unknown resolution as `None` without an ID. `materialization_id` SHALL be a non-empty string for reused materialized successes and MAY also be present for executed successes with a completed commit. It SHALL be absent for ordinary successful attempts and non-success outcomes. IDs require a known resolution. Existing zero-argument and explicit version 1–3 projections SHALL retain their prior shapes; version 4 SHALL export these fields.
+
+`TaskReference.task_name` and `RunResult.run_id` SHALL be non-empty strings. An
 absent partition SHALL be represented only by `partition_key_present=False` and
 `partition_key=None`; a present partition SHALL have
-`partition_key_present=True` and a non-`None` raw key.  Result collection fields
+`partition_key_present=True` and a non-`None` raw key. Result collection fields
 SHALL remain tuples and result envelopes SHALL not be structurally mutable.
 
 #### Scenario: A falsey partition key remains present
@@ -54,6 +62,16 @@ SHALL remain tuples and result envelopes SHALL not be structurally mutable.
   partition with `None` as its key
 - **THEN** construction raises `ValueError`
 
+#### Scenario: A reused attempt is identifiable in memory
+- **WHEN** a committed materialization supplies a successful attempt's output
+- **THEN** that attempt's in-memory resolution is `materialized` and it has a committed materialization identifier while its historical portable projections retain their existing shapes and version 4 reports this metadata
+
+`RunResult.resources` SHALL be a tuple of immutable ResourceStatistics snapshots as defined by the resource-execution-statistics capability, defaulting empty without reconstructing absent historical metadata. Existing result projection versions1–4 SHALL omit this field.
+
+#### Scenario: Live resource metadata preserves historical result shape
+- **WHEN** a completed result includes resource summaries
+- **THEN** the live tuple and exact-name lookup expose them while portable versions1–4 retain their prior shapes
+
 ### Requirement: Result snapshots are completed, time-valid terminal outcomes
 `AttemptResult` and `TaskResult` SHALL accept only terminal `AttemptStatus` values:
 `success`, `failed`, `skipped`, or `cancelled`.  `RunResult` SHALL accept only
@@ -64,8 +82,7 @@ not calculated from wall-clock timestamps.
 
 An attempt with `failed` status SHALL have `FailureInfo`; it MAY retain a raw
 exception in `exception`.  A non-failed attempt SHALL have neither `failure` nor
-`exception`.  A skipped attempt SHALL have a reason; only
-`dependency_blocked` is valid for an attempt and it SHALL have non-empty
+`exception`.  A skipped attempt SHALL have a reason; `dependency_blocked` and `resource_circuit_open` are valid for attempts and SHALL have non-empty
 `blocked_by`.  A non-skipped attempt SHALL have `reason=None` and empty
 `blocked_by`.
 
@@ -88,8 +105,7 @@ zero-attempt task result is valid.
 
 For non-empty partitioned tasks, aggregate status SHALL be `failed` if any attempt
 failed; otherwise `cancelled` if any attempt was cancelled; otherwise `skipped` if
-any attempt was skipped; otherwise `success`.  A `dependency_blocked` aggregate is
-valid only when every attempt is a dependency-blocked skip, and its `blocked_by`
+any attempt was skipped; otherwise `success`.  A uniform blocked aggregate SHALL use its shared `dependency_blocked` or `resource_circuit_open` reason only when every attempt is skipped with that reason; an all-skipped aggregate with both reasons SHALL use `mixed_blocked`. Its `blocked_by`
 SHALL concatenate attempt blockers in attempt order.  A mixed success/skipped
 aggregate SHALL use `reason=None` and `blocked_by=()`.
 
@@ -149,3 +165,21 @@ tuple orders.
 - **WHEN** a present partition key is an arbitrary non-serializable object
 - **THEN** its attempt record contains `partition: {"present": true}` and contains
   no raw partition-key field
+
+### Requirement: Numbered invocation history preserves logical result semantics
+A logical attempt SHALL optionally retain an immutable ordered invocation history. Each entry SHALL carry a contiguous one-based number, success/failed status, UTC start/end and non-negative duration, failure metadata exactly for failed invocations, and nullable applied retry delay and cooldown seconds. Enabled policies SHALL record each body-plus-commit operation; materialization hits and failures before a body SHALL have empty history. A failed entry SHALL not force the logical aggregate to fail when a later invocation succeeds. Constructor validation SHALL reject malformed history and delay fields. For a normal success/failed logical outcome with nonempty history, its final status SHALL match the final invocation and its final invocation SHALL NOT retain a scheduled retry delay.
+
+#### Scenario: Recover after an initial failure
+- **WHEN** a logical partition attempt fails once and then succeeds
+- **THEN** its final status is success and its ordered history contains failed invocation 1 followed by successful invocation 2
+
+### Requirement: Result projections support explicit portable record versions
+Existing zero-argument result projections SHALL preserve portable record version 1. Explicit version 2 projections SHALL add an ordered `invocations` array to each attempt, with number, status, start/end/duration, nullable failure, retry-delay and cooldown seconds. Explicit version 3 SHALL preserve version 2 fields and support circuit and mixed-blocked reasons. Versions 1 and 2 SHALL reject results containing these new reasons. Explicit version 4 SHALL preserve version 3 fields and add nullable resolution and materialization_id to every attempt using the successful provenance contract. Versions 1–3 SHALL retain their prior shapes and omit provenance. Unknown or boolean versions SHALL be rejected. All versions SHALL omit raw outputs, raw exceptions, raw partition keys and classifier code.
+
+#### Scenario: Export retry history safely
+- **WHEN** a recovered result is projected explicitly as portable record version 2
+- **THEN** invocation history is included without raw output/exception/key values and version 1 retains its original shape
+
+#### Scenario: Export committed provenance
+- **WHEN** a successful committed or reused result is projected as version 4
+- **THEN** resolution and ID are present and projecting versions 1–3 still omits both fields

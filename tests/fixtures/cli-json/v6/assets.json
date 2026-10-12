@@ -1,0 +1,1 @@
+{"data":{"assets":[{"dependencies":[],"name":"extract","partitioned":false},{"dependencies":["extract"],"name":"publish","partitioned":true}],"declared_flow":true},"document_type":"kazeflow.assets","schema_version":1}

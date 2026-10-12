@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
+import math
 from typing import Protocol, Sequence
 
 from .results import (
@@ -25,6 +26,8 @@ class EventKind(str, Enum):
     ATTEMPT_FINISHED = "attempt_finished"
     TASK_FINISHED = "task_finished"
     FLOW_FINISHED = "flow_finished"
+    INVOCATION_STARTED = "invocation_started"
+    INVOCATION_FINISHED = "invocation_finished"
 
 
 _TERMINAL_FLOW_STATUSES = {
@@ -66,6 +69,16 @@ def _validate_skipped_payload(
         if not blocked_by:
             raise ValueError("dependency-blocked events require blockers")
         return
+    if reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+        if not blocked_by:
+            raise ValueError("circuit-blocked events require blockers")
+        if kind is EventKind.ATTEMPT_FINISHED and len(blocked_by) != 1:
+            raise ValueError("a circuit-blocked attempt requires exactly one blocker")
+        return
+    if reason is SkipReason.MIXED_BLOCKED:
+        if kind is not EventKind.TASK_FINISHED or not blocked_by:
+            raise ValueError("mixed_blocked is valid only for blocked task finishes")
+        return
     if reason is SkipReason.NO_PARTITION_KEYS:
         if kind is not EventKind.TASK_FINISHED or blocked_by:
             raise ValueError(
@@ -73,6 +86,19 @@ def _validate_skipped_payload(
             )
         return
     raise ValueError("unknown skip reason")
+
+
+def _validate_optional_seconds(value: float | None, field_name: str) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be finite non-negative seconds or None")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite or value < 0:
+        raise ValueError(f"{field_name} must be finite non-negative seconds or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +115,11 @@ class ExecutionEvent:
     reason: SkipReason | None = None
     blocked_by: tuple[AttemptReference, ...] = ()
     failure: FailureInfo | None = None
+    invocation_number: int | None = None
+    retry_delay_seconds: float | None = None
+    cooldown_seconds: float | None = None
+    resolution: str | None = None
+    materialization_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or not self.run_id:
@@ -111,6 +142,32 @@ class ExecutionEvent:
             raise ValueError("reason must be a SkipReason or None")
         if self.failure is not None and not isinstance(self.failure, FailureInfo):
             raise ValueError("failure must be a FailureInfo or None")
+        if self.invocation_number is not None and (
+            isinstance(self.invocation_number, bool)
+            or not isinstance(self.invocation_number, int)
+            or self.invocation_number < 1
+        ):
+            raise ValueError("invocation_number must be a positive integer or None")
+        _validate_optional_seconds(self.retry_delay_seconds, "retry_delay_seconds")
+        _validate_optional_seconds(self.cooldown_seconds, "cooldown_seconds")
+
+        if self.resolution is not None or self.materialization_id is not None:
+            if (
+                self.kind is not EventKind.ATTEMPT_FINISHED
+                or self.status is not AttemptStatus.SUCCESS
+            ):
+                raise ValueError(
+                    "provenance is only valid for successful attempt finishes"
+                )
+            if self.resolution not in ("executed", "materialized"):
+                raise ValueError("resolution must be executed or materialized")
+            if self.materialization_id is not None and (
+                not isinstance(self.materialization_id, str)
+                or not self.materialization_id
+            ):
+                raise ValueError("materialization_id must be a non-empty string")
+            if self.resolution == "materialized" and self.materialization_id is None:
+                raise ValueError("materialized resolution requires materialization_id")
 
         if self.kind is EventKind.FLOW_STARTED:
             self._validate_flow_started()
@@ -122,8 +179,10 @@ class ExecutionEvent:
             self._validate_task_finished()
         elif self.kind is EventKind.ATTEMPT_STARTED:
             self._validate_attempt_started()
-        else:
+        elif self.kind is EventKind.ATTEMPT_FINISHED:
             self._validate_attempt_finished()
+        else:
+            self._validate_invocation()
 
     def _validate_flow_started(self) -> None:
         if self.task is not None or self.attempt is not None:
@@ -165,6 +224,7 @@ class ExecutionEvent:
         )
         if self.failure is not None:
             raise ValueError("only failed attempt-finished events may carry failure")
+        self._validate_no_invocation_fields()
 
     def _validate_attempt_started(self) -> None:
         if self.task is not None or not isinstance(self.attempt, AttemptReference):
@@ -192,16 +252,83 @@ class ExecutionEvent:
                 raise ValueError("failed attempt-finished events require failure")
         elif self.failure is not None:
             raise ValueError("only failed attempt-finished events may carry failure")
+        self._validate_no_invocation_fields()
 
     def _validate_no_skip_or_failure(self) -> None:
         if self.reason is not None or self.blocked_by:
             raise ValueError("reason and blocked_by are only valid for skipped events")
         if self.failure is not None:
             raise ValueError("only failed attempt-finished events may carry failure")
+        self._validate_no_invocation_fields()
 
-    def to_record(self) -> dict[str, object]:
+    def _validate_no_invocation_fields(self) -> None:
+        if (
+            self.invocation_number is not None
+            or self.retry_delay_seconds is not None
+            or self.cooldown_seconds is not None
+        ):
+            raise ValueError("invocation fields are only valid for invocation events")
+
+    def _validate_invocation(self) -> None:
+        if not isinstance(self.attempt, AttemptReference) or self.task is not None:
+            raise ValueError("invocation events require attempt and forbid task")
+        if self.reason is not None or self.blocked_by:
+            raise ValueError("invocation events cannot carry skip fields")
+        if self.invocation_number is None:
+            raise ValueError("invocation events require invocation_number")
+        if self.kind is EventKind.INVOCATION_STARTED:
+            if self.status is not AttemptStatus.RUNNING:
+                raise ValueError("invocation_started requires AttemptStatus.RUNNING")
+            if self.failure is not None:
+                raise ValueError("invocation_started cannot carry failure")
+            if (
+                self.retry_delay_seconds is not None
+                or self.cooldown_seconds is not None
+            ):
+                raise ValueError("invocation_started cannot carry retry delays")
+            return
+        if self.kind is not EventKind.INVOCATION_FINISHED:
+            raise ValueError("unknown invocation event kind")
+        if not isinstance(self.status, AttemptStatus) or self.status not in (
+            AttemptStatus.SUCCESS,
+            AttemptStatus.FAILED,
+        ):
+            raise ValueError("invocation_finished requires success or failed status")
+        if self.status is AttemptStatus.FAILED:
+            if self.failure is None:
+                raise ValueError("failed invocation_finished requires failure")
+        elif self.failure is not None:
+            raise ValueError("successful invocation_finished cannot carry failure")
+        if self.status is AttemptStatus.SUCCESS and (
+            self.retry_delay_seconds is not None or self.cooldown_seconds is not None
+        ):
+            raise ValueError(
+                "retry delays are only valid for failed invocation finishes"
+            )
+
+    def to_record(self, *, schema_version: int = 4) -> dict[str, object]:
         """Return the fixed, intentionally lossy event record projection."""
-        return {
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version not in (1, 2, 3, 4)
+        ):
+            raise ValueError("schema_version must be 1, 2, 3, or 4")
+        if schema_version in (1, 2) and self.reason in {
+            SkipReason.RESOURCE_CIRCUIT_OPEN,
+            SkipReason.MIXED_BLOCKED,
+        }:
+            raise ValueError(
+                f"{self.reason.value} cannot be projected as schema version {schema_version}"
+            )
+        if schema_version == 1 and self.kind in {
+            EventKind.INVOCATION_STARTED,
+            EventKind.INVOCATION_FINISHED,
+        }:
+            raise ValueError(
+                "invocation events cannot be projected as schema version 1"
+            )
+        record: dict[str, object] = {
             "run_id": self.run_id,
             "sequence": self.sequence,
             "occurred_at": self.occurred_at.isoformat(),
@@ -213,6 +340,19 @@ class ExecutionEvent:
             "blocked_by": [blocker.to_record() for blocker in self.blocked_by],
             "failure": self.failure.to_record() if self.failure is not None else None,
         }
+        if schema_version in (2, 3, 4):
+            record.update(
+                {
+                    "schema_version": schema_version,
+                    "invocation_number": self.invocation_number,
+                    "retry_delay_seconds": self.retry_delay_seconds,
+                    "cooldown_seconds": self.cooldown_seconds,
+                }
+            )
+        if schema_version == 4:
+            record["resolution"] = self.resolution
+            record["materialization_id"] = self.materialization_id
+        return record
 
 
 class ExecutionEventConsumer(Protocol):
@@ -251,6 +391,10 @@ class _LifecycleState:
     finished: bool = False
     finish_status: AttemptStatus | None = None
     finish_reason: SkipReason | None = None
+    invocation_last_number: int = 0
+    invocation_open: int | None = None
+    invocation_status: AttemptStatus | None = None
+    invocation_retry_delay: float | None = None
 
 
 def _attempt_state(
@@ -269,6 +413,7 @@ def _finish_without_start_is_allowed(state: _LifecycleState) -> bool:
     return state.finish_status is AttemptStatus.SKIPPED and state.finish_reason in {
         SkipReason.DEPENDENCY_BLOCKED,
         SkipReason.NO_PARTITION_KEYS,
+        SkipReason.RESOURCE_CIRCUIT_OPEN,
     }
 
 
@@ -313,6 +458,24 @@ def validate_event_sequence(events: Sequence[ExecutionEvent]) -> None:
             for attempt, attempt_state in attempt_states:
                 if attempt.task == event.task and not attempt_state.finished:
                     raise ValueError("task finished before one of its attempts")
+            if event.reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+                for blocker in event.blocked_by:
+                    source_state = next(
+                        (
+                            candidate
+                            for known_attempt, candidate in attempt_states
+                            if known_attempt == blocker
+                        ),
+                        None,
+                    )
+                    if (
+                        source_state is None
+                        or not source_state.finished
+                        or source_state.finish_status is not AttemptStatus.FAILED
+                    ):
+                        raise ValueError(
+                            "circuit blocker must reference an earlier failed attempt finish"
+                        )
             state.finished = True
             assert isinstance(event.status, AttemptStatus)
             state.finish_status = event.status
@@ -338,10 +501,85 @@ def validate_event_sequence(events: Sequence[ExecutionEvent]) -> None:
             state = _attempt_state(attempt_states, event.attempt)
             if state.finished:
                 raise ValueError("attempt lifecycle has more than one finish")
-            state.finished = True
+            if event.reason is SkipReason.RESOURCE_CIRCUIT_OPEN:
+                blocker = event.blocked_by[0]
+                source_state = next(
+                    (
+                        candidate
+                        for known_attempt, candidate in attempt_states
+                        if known_attempt == blocker
+                    ),
+                    None,
+                )
+                if (
+                    source_state is None
+                    or not source_state.finished
+                    or source_state.finish_status is not AttemptStatus.FAILED
+                ):
+                    raise ValueError(
+                        "circuit blocker must reference an earlier failed attempt finish"
+                    )
+            if state.invocation_open is not None:
+                raise ValueError("attempt finished before its invocation finished")
             assert isinstance(event.status, AttemptStatus)
+            if state.invocation_last_number and event.status in {
+                AttemptStatus.SUCCESS,
+                AttemptStatus.FAILED,
+            }:
+                if state.invocation_status is not event.status:
+                    raise ValueError(
+                        "last invocation status must match the terminal attempt status"
+                    )
+                if state.invocation_retry_delay is not None:
+                    raise ValueError(
+                        "a scheduled retry cannot terminate a successful or failed attempt"
+                    )
+            state.finished = True
             state.finish_status = event.status
             state.finish_reason = event.reason
+        elif event.kind in {
+            EventKind.INVOCATION_STARTED,
+            EventKind.INVOCATION_FINISHED,
+        }:
+            assert event.attempt is not None
+            task_state = task_states.get(event.attempt.task)
+            if task_state is None or not task_state.started:
+                raise ValueError("invocation occurred before its task started")
+            if task_state.finished:
+                raise ValueError("invocation occurred after its task finished")
+            state = _attempt_state(attempt_states, event.attempt)
+            if not state.started or state.finished:
+                raise ValueError("invocation must occur within a logical attempt")
+            assert event.invocation_number is not None
+            if event.kind is EventKind.INVOCATION_STARTED:
+                if state.invocation_open is not None:
+                    raise ValueError("invocations for one attempt cannot overlap")
+                expected_number = state.invocation_last_number + 1
+                if event.invocation_number != expected_number:
+                    raise ValueError(
+                        "invocation numbers must be contiguous and one-based"
+                    )
+                if (
+                    state.invocation_last_number
+                    and state.invocation_status is not AttemptStatus.FAILED
+                ):
+                    raise ValueError(
+                        "a successful invocation cannot be followed by another"
+                    )
+                if (
+                    state.invocation_last_number
+                    and state.invocation_retry_delay is None
+                ):
+                    raise ValueError("a retry requires a delay on the prior failure")
+                state.invocation_open = event.invocation_number
+            else:
+                if state.invocation_open != event.invocation_number:
+                    raise ValueError("invocation finish must match its open invocation")
+                state.invocation_open = None
+                state.invocation_last_number = event.invocation_number
+                assert isinstance(event.status, AttemptStatus)
+                state.invocation_status = event.status
+                state.invocation_retry_delay = event.retry_delay_seconds
 
     for task, state in task_states.items():
         if not state.finished:

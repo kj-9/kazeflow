@@ -3,7 +3,9 @@
 ## Purpose
 
 Specify stdlib CLI inspection for script-defined flows.
+
 ## Requirements
+
 ### Requirement: Inspect scripts through `kazeflow`
 
 `kazeflow assets`, `kazeflow partitions`, and `kazeflow plan` SHALL use the flow
@@ -81,3 +83,17 @@ execution, or a mandatory third-party runtime dependency.
   or plan output
 - **THEN** stdout remains one typed inspection document and the entry text is sent
   to stderr
+
+### Requirement: Text plan output identifies selected resource limits
+The CLI text plan SHALL show each selected named resource and its concurrency limit, plus the resource association of each selected asset. It SHALL not imply a cross-run rate limit or API-call quota. Flows without resources SHALL remain readable without an empty resource table.
+
+#### Scenario: Review a shared resource
+- **WHEN** a CLI plan includes two assets using one resource
+- **THEN** text output shows the shared resource limit and both task associations before any asset body executes
+
+### Requirement: Text plans identify the unit and scope of rate limits
+Text plan output SHALL identify each selected resource's configured body-start count and duration when a rate limit exists. It SHALL explain that the unit is asset body starts within one run rather than API request quota. Plans without rate limits SHALL remain readable.
+
+#### Scenario: Review a resource rate limit
+- **WHEN** a text plan uses a resource allowing two body starts per second
+- **THEN** its resource summary shows that count, duration, and invocation unit

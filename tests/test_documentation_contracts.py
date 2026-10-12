@@ -57,6 +57,14 @@ def test_json_automation_reference_has_complete_public_contract_links() -> None:
         "runs-compare.schema.json",
     ):
         assert (docs_root / "schemas" / "cli" / "v1" / schema_name).is_file()
+    assert (docs_root / "schemas" / "cli" / "v2" / "schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v2" / "plan.schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v3" / "schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v3" / "plan.schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v4" / "schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v4" / "plan.schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v5" / "schema.json").is_file()
+    assert (docs_root / "schemas" / "cli" / "v5" / "plan.schema.json").is_file()
 
 
 def test_partition_selection_contract_matches_documentation(
@@ -130,7 +138,7 @@ def test_partition_selection_contract_matches_documentation(
     )
     key_projection = json.loads(capsys.readouterr().out)
     assert key_projection["document_type"] == "kazeflow.plan"
-    assert key_projection["schema_version"] == 1
+    assert key_projection["schema_version"] == 5
     key_data = key_projection["data"]
     assert key_data["config"]["partition_selection"] == {
         "kind": "keys",
